@@ -23,11 +23,6 @@ estoque** e **notificar o cliente**. Elas são tratadas hoje como uma operação
 | Reservar o estoque | ~100 ms | Não | **Sim** |
 | Notificar o cliente | 1 a 5 s | **Sim** (provedor de e-mail) | Não |
 
-Essa heterogeneidade é o fato central do cenário. Há etapas rápidas e etapas
-lentas; etapas sob controle da loja e etapas que dependem de serviços externos
-indisponíveis a qualquer momento; etapas cuja falha invalida a venda e etapas
-cuja falha é irrelevante para ela. Tratar as quatro como uma operação única faz
-com que **a pior característica de cada uma seja imposta a todas**.
 
 Dois requisitos de negócio delimitam o problema:
 
@@ -54,12 +49,12 @@ POST /pedidos ──► grava ──► cobra ──► baixa estoque ──► 
 Disso decorrem cinco problemas concretos:
 
 **a) Acoplamento temporal.** A resposta é tão lenta quanto a soma das etapas. A
-latência percebida na loja passa a ser determinada pelo gateway de pagamento —
+latência percebida na loja passa a ser determinada pelo gateway de pagamento,
 um sistema de terceiros sobre o qual a loja não tem controle.
 
 **b) Falha em cascata.** Se o provedor de e-mail está fora do ar, a chamada lança
 exceção e a transação inteira falha. O cliente vê "erro ao finalizar o pedido" e
-a venda é perdida — por causa de uma etapa que não era crítica para a venda.
+a venda é perdida por causa de uma etapa que não era crítica para a venda.
 
 **c) Acoplamento estrutural.** Adicionar qualquer nova reação ao pedido (pontos
 de fidelidade, painel de BI, emissão fiscal) exige modificar o código do

@@ -12,7 +12,10 @@ A solução tem **dois processos** (`api` e `worker`), um broker **RabbitMQ** e 
 banco **PostgreSQL**. Nenhum componente de negócio chama outro diretamente: toda
 comunicação entre eles passa pelo broker.
 
-> `docs/diagramas/arquitetura.png`
+![Arquitetura da solução](diagramas/arquitetura.png)
+
+<details>
+<summary>Fonte Mermaid (<code>diagramas/arquitetura.mmd</code>)</summary>
 
 ```mermaid
 flowchart TB
@@ -36,6 +39,18 @@ flowchart TB
     HE --> PG
     HN --> PG
 ```
+
+</details>
+ocorre fan-out:
+  
+  A->>X: publish pedido.criado        ← o publish                                                                                                                                    
+  X->>P: pedido.criado                ┐ fan-out #1: api → { pagamento, notificacao }                                                                                                 
+  X->>N: pedido.criado                ┘                                                                                                                                              
+
+P->>X: publish pagamento.aprovado   ← o publish                                                                                                                                    
+X->>E: pagamento.aprovado           ┐ fan-out #2: pagamento → { estoque, notificacao }                                                                                             
+X->>N: pagamento.aprovado           ┘
+
 
 ### 1.1 Produtores
 
@@ -112,7 +127,10 @@ existência do outro.
 
 ### 2.3 Fluxo bem-sucedido
 
-> `docs/diagramas/sequencia-feliz.png`
+![Fluxo bem-sucedido](diagramas/sequencia-feliz.png)
+
+<details>
+<summary>Fonte Mermaid (<code>diagramas/sequencia-feliz.mmd</code>)</summary>
 
 ```mermaid
 sequenceDiagram
@@ -147,12 +165,17 @@ sequenceDiagram
     N->>X: ack
 ```
 
+</details>
+
 O `201` sai antes de qualquer processamento — é o desacoplamento temporal da
 Etapa 1 se concretizando.
 
 ### 2.4 Estados do pedido
 
-> `docs/diagramas/estados.png`
+![Estados do pedido](diagramas/estados.png)
+
+<details>
+<summary>Fonte Mermaid (<code>diagramas/estados.mmd</code>)</summary>
 
 ```mermaid
 stateDiagram-v2
@@ -165,6 +188,8 @@ stateDiagram-v2
     RECUSADO --> [*]
     SEM_ESTOQUE --> [*]
 ```
+
+</details>
 
 ---
 
@@ -238,7 +263,10 @@ Falhas são classificadas em duas categorias, com tratamentos distintos:
 
 Retentar falha permanente é desperdício: JSON quebrado não se conserta sozinho.
 
-> `docs/diagramas/retentativa.png`
+![Retentativa e DLQ](diagramas/retentativa.png)
+
+<details>
+<summary>Fonte Mermaid (<code>diagramas/retentativa.mmd</code>)</summary>
 
 ```mermaid
 flowchart LR
@@ -251,6 +279,8 @@ flowchart LR
     Q -.->|"3a falha (header x-death)"| DX{{exchange: dlx}}
     DX --> DLQ[["fila: dlq<br/>inspecao manual"]]
 ```
+
+</details>
 
 **Retentativa.** O RabbitMQ não tem retentativa com espera nativa, mas ela é
 obtida combinando duas funcionalidades que ele já oferece — TTL de mensagem e
@@ -273,7 +303,10 @@ blocking*, em que uma mensagem defeituosa trava a fila inteira), e **preserva a
 evidência**, mantendo a mensagem íntegra com todo o histórico de tentativas para
 inspeção e eventual republicação.
 
-> `docs/diagramas/sequencia-falha.png`
+![Fluxo com falha](diagramas/sequencia-falha.png)
+
+<details>
+<summary>Fonte Mermaid (<code>diagramas/sequencia-falha.mmd</code>)</summary>
 
 ```mermaid
 sequenceDiagram
@@ -303,6 +336,8 @@ sequenceDiagram
     P->>X: ack
     D->>DLQ: mensagem isolada para inspeção
 ```
+
+</details>
 
 **Reconexão e encerramento.** Perder a conexão com o broker não encerra o
 processo: ele reconecta com espera crescente. Ao receber `SIGTERM`, o *worker*
