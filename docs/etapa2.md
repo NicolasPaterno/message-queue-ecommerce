@@ -290,11 +290,6 @@ original**; `retry.q` a segura por 10 s; o TTL expira e ela é *dead-lettered* d
 volta ao exchange `pedidos`, ainda com a routing key original, retornando à fila
 correta.
 
-A alternativa ingênua seria `Nack(requeue: true)`, que recoloca a mensagem
-imediatamente no início da fila. Com o gateway fora, isso produz um laço de falha
-em altíssima frequência que satura broker e consumidor — uma negação de serviço
-contra o próprio sistema.
-
 **Dead letter queue.** O broker não limita tentativas, mas registra cada passagem
 no cabeçalho `x-death`. O handler lê esse contador e, na terceira, publica no
 exchange `dlx` e confirma a original. A DLQ cumpre duas funções: **isola o
