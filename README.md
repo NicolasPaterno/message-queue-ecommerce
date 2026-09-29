@@ -27,4 +27,4 @@ Detalhes completos, diagramas e justificativa de decisões em [`docs/etapa2.md`]
 
 ## Stack planejada
 
-Go 1.23 · `rabbitmq/amqp091-go` · `net/http` · `database/sql` · PostgreSQL 16 · Docker Compose
+Go 1.27 · `rabbitmq/amqp091-go` · `net/http` · `database/sql` · PostgreSQL 16 · Docker Compose
