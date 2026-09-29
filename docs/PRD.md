@@ -144,13 +144,19 @@ Non-negotiable — these are what the reliability and scalability claims in
 
 ## 5. Code
 
-**3 Go files + 3 infra files.** One binary; Compose varies the `command:`.
+**One package per module + 4 infra files.** One binary; Compose varies the `command:`.
+Dependencies point one way: `cmd/shop` → `api`, `stock`, `payment`, `notification` → `mq`, `store`.
 
 ```
 message-queue-ecommerce/
-├── main.go                  # switch: "api" | "worker"; api = cart routes + GET /orders/:id
-├── mq.go                    # connect, declare topology, publish, consume, retry/DLQ
-├── handlers.go              # stock (reserve/release), payment, notification
+├── cmd/shop/main.go         # switch: "api" | "worker"; env, DB connect, worker wiring
+├── internal/
+│   ├── mq/                  # RabbitMQ: names + Envelope (mq.go), publish.go, consume.go (retry/DLQ)
+│   ├── store/               # order statuses, items, tx, idempotency, CAS
+│   ├── stock/               # stock.Handler: reserve / release
+│   ├── payment/             # payment.Handler
+│   ├── notification/        # notification.Handler
+│   └── api/                 # api.Run: cart routes + GET /orders/:id
 ├── Dockerfile
 ├── deploy/
 │   ├── docker-compose.yml
@@ -253,19 +259,19 @@ graded here.
 
 | # | Task | Output | US |
 |---|---|---|---|
-| 3.1 | `mq.go`: connect, declare 4 exchanges + 6 queues, publish with confirms | code | US2 |
-| 3.2 | `mq.go`: consume with prefetch, manual ack, `x-death` retry/DLQ routing | code | US5 |
+| 3.1 | `internal/mq`: connect, declare 4 exchanges + 6 queues, publish with confirms | code | US2 |
+| 3.2 | `internal/mq`: consume with prefetch, manual ack, `x-death` retry/DLQ routing | code | US5 |
 | 3.3 | `definitions.json`: vhost, users, permissions | config | — |
 | 3.4 | `etapa3.md`: every parameter with its rationale + TLS config | doc | — |
-| 4.1 | `handlers.go` stock: reserve (one tx, all items) + CAS + publish `reservation.created` and `reservation.expired`; release | code | US3, US7, US9, US10 |
-| 4.2 | `handlers.go` payment (CAS → `PAID`, refund log on lost CAS) + notification (log only) | code | US3, US4 |
-| 4.3 | `main.go`: mode switch + 4 HTTP routes | code | US1 |
+| 4.1 | `internal/stock`: reserve (one tx, all items) + CAS + publish `reservation.created` and `reservation.expired`; release | code | US3, US7, US9, US10 |
+| 4.2 | `internal/payment` (CAS → `PAID`, refund log on lost CAS) + `internal/notification` (log only) | code | US3, US4 |
+| 4.3 | `internal/api`: 4 HTTP routes + `cmd/shop/main.go`: mode switch | code | US1 |
 | 4.4 | `deploy/`: Compose, `init.sql`, Dockerfile | config | US6 |
 | 4.5 | Run the 11 use cases, capture evidence | `etapa4.md` | all |
 | 5.1 | `etapa5.md`: stack, message format, practices (§4 here, in Portuguese) | doc | — |
 | 5.2 | README: step-by-step run instructions | `README.md` | — |
 
-**Order:** 3.1 → 3.2 → 4.1 → 4.2 → 4.3 → 4.4, then the docs. Everything depends on `mq.go`.
+**Order:** 3.1 → 3.2 → 4.1 → 4.2 → 4.3 → 4.4, then the docs. Everything depends on `internal/mq` and `internal/store`.
 
 Estimate: **~500 lines of Go** (was ~400; +cart routes, +release, +CAS).
 
@@ -283,9 +289,9 @@ Estimate: **~500 lines of Go** (was ~400; +cart routes, +release, +CAS).
 
 | Track | Owns | Presents |
 |---|---|---|
-| A | `mq.go` — topology (incl. `expiry`), publisher | Architecture and RabbitMQ configuration |
-| B | `handlers.go` stock + `main.go` cart routes | Happy path, last-unit concurrency |
-| C | `handlers.go` payment/notification, retry/DLQ + `definitions.json` | Failure → DLQ → expiry demo, and security |
+| A | `internal/mq` — topology (incl. `expiry`), publisher | Architecture and RabbitMQ configuration |
+| B | `internal/stock` + `internal/api` cart routes | Happy path, last-unit concurrency |
+| C | `internal/payment`/`notification`, retry/DLQ + `definitions.json` | Failure → DLQ → expiry demo, and security |
 | D | `deploy/`, docs, diagrams | Scenario and scaling demo |
 
 With fewer members, merge adjacent tracks. **Anyone who does not present gets a
