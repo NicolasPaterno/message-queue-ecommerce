@@ -1,0 +1,5 @@
+# GoLand / IntelliJ
+.idea/
+
+# Documento do trabalho
+*.doc
