@@ -8,6 +8,7 @@ import (
 	"log"
 	"sync"
 	"time"
+	"uuid"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -73,7 +74,7 @@ func consumeDeclare(conn *amqp.Connection) error {
 	return DeclareTopology(ch)
 }
 
-// consume uses manual ack. Bad JSON, ErrPermanent or the last allowed attempt → dlq + ack;
+// consume uses manual ack. Bad JSON or non-UUID ids, ErrPermanent or the last allowed attempt → dlq + ack;
 // other failures → nack without requeue, which dead-letters to retry.q.
 // Handlers get a context that ignores cancellation so a shutdown never aborts an in-flight tx;
 // ctx is only checked between deliveries, and closing the channel requeues the unacked prefetch.
@@ -99,15 +100,15 @@ func consume(ctx context.Context, conn *amqp.Connection, queue string, h Handler
 			if !ok {
 				return fmt.Errorf("queue %s: deliveries closed", queue)
 			}
-			var env Envelope
-			if err := json.Unmarshal(d.Body, &env); err != nil {
+			env, err := decode(d.Body)
+			if err != nil {
 				log.Printf("queue=%s id=%s -> dlq: %v", queue, d.MessageId, err)
 				consumeDLQ(hctx, ch, d)
 				continue
 			}
 			n := deathCount(d, queue)
 			log.Printf("queue=%s type=%s id=%s order_id=%s attempt=%d", queue, env.Type, env.ID, env.OrderID, n+1)
-			err := h(hctx, ch, env)
+			err = h(hctx, ch, env)
 			switch {
 			case err == nil:
 				d.Ack(false)
@@ -120,6 +121,21 @@ func consume(ctx context.Context, conn *amqp.Connection, queue string, h Handler
 			}
 		}
 	}
+}
+
+// decode rejects bodies that would only fail later in Postgres (ids are uuid columns), so they skip the retries.
+func decode(body []byte) (Envelope, error) {
+	var env Envelope
+	if err := json.Unmarshal(body, &env); err != nil {
+		return env, err
+	}
+	if _, err := uuid.Parse(env.ID); err != nil {
+		return env, fmt.Errorf("id: %w", err)
+	}
+	if _, err := uuid.Parse(env.OrderID); err != nil {
+		return env, fmt.Errorf("order_id: %w", err)
+	}
+	return env, nil
 }
 
 // consumeDLQ acks only after the dlq publish is confirmed; if it fails the message goes to retry instead of being lost.

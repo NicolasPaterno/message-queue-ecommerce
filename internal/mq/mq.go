@@ -2,10 +2,9 @@ package mq
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"uuid"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -45,13 +44,7 @@ type Envelope struct {
 }
 
 func NewID() string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		panic(err)
-	}
-	b[6] = b[6]&0x0f | 0x40
-	b[8] = b[8]&0x3f | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+	return uuid.New().String()
 }
 
 // NewEnvelope marshals data into Data; nil data becomes {} so the wire shape is always an object.
