@@ -1,0 +1,16 @@
+flowchart LR
+    PC([order.placed]) --> R["stock: reserve<br/>PLACED → RESERVED"]
+    R -->|publica reservation.expired| XE{{exchange: expiry}}
+    XE --> QX[["fila: expiry.q<br/>x-message-ttl: 120000"]]
+    QX -.->|"TTL expira, dead-letter<br/>volta ao exchange orders"| L
+
+    R --> ST{"status = RESERVED<br/>quem chega primeiro vence"}
+    ST -->|"cobranca aprovada<br/>CAS → PAID"| PAID([PAID: venda concluida])
+    ST -->|"payment.declined<br/>CAS → DECLINED"| L["stock: release<br/>devolve available"]
+    ST -->|"reservation.expired<br/>CAS → EXPIRED"| L
+    L -.->|"CAS afeta 0 linhas<br/>(ja PAID ou ja liberado)"| NOOP([no-op, ack])
+
+    classDef ex fill:#e8e8f5,stroke:#555
+    classDef q fill:#f5f0e0,stroke:#555
+    class XE ex
+    class QX q

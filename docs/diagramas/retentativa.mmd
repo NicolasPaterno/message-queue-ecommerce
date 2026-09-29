@@ -1,9 +1,9 @@
 flowchart LR
-    Q[["fila de negocio<br/>(pagamento / estoque / notificacao)"]]
+    Q[["fila de negocio<br/>(stock / payment / notification)"]]
     Q -->|handler processa| OK([sucesso: ack])
     Q -.->|"falha: Nack(requeue=false)"| RX{{exchange: retry}}
     RX --> RQ[["fila: retry.q<br/>x-message-ttl: 10000"]]
-    RQ -.->|"TTL expira, dead-letter<br/>routing key preservada"| EX{{exchange: pedidos}}
+    RQ -.->|"TTL expira, dead-letter<br/>routing key preservada"| EX{{exchange: orders}}
     EX -.->|volta para a fila correta| Q
     Q -.->|"3a falha (header x-death)"| DX{{exchange: dlx}}
     DX --> DLQ[["fila: dlq<br/>inspecao manual"]]

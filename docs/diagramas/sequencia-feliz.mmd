@@ -1,30 +1,34 @@
 sequenceDiagram
     participant C as Cliente
     participant A as api
-    participant X as exchange pedidos
-    participant P as handler pagamento
-    participant E as handler estoque
-    participant N as handler notificacao
+    participant X as exchange orders
+    participant S as handler stock
+    participant P as handler payment
+    participant N as handler notification
     participant DB as PostgreSQL
 
-    C->>A: POST /pedidos
-    A->>DB: INSERT pedido (status CRIADO)
-    A->>X: publish pedido.criado
+    C->>A: POST /carts, POST /carts/:id/items
+    A->>DB: INSERT orders (CART) e order_items
+    C->>A: POST /carts/:id/checkout
+    A->>DB: CART → PLACED
+    A->>X: publish order.placed
     X-->>A: publisher confirm
     A-->>C: 201 Created (~150 ms)
 
-    X->>P: pedido.criado
-    X->>N: pedido.criado
+    X->>S: order.placed
+    X->>N: order.placed
+    S->>DB: available - q (atomico) + PLACED → RESERVED, 1 transacao
+    S->>X: publish reservation.created
+    S->>X: publish reservation.expired (exchange expiry, TTL 120 s)
+    S->>X: ack
+
+    X->>P: reservation.created
+    X->>N: reservation.created
     P->>P: cobra no gateway (simulado)
-    P->>X: publish pagamento.aprovado
+    P->>DB: RESERVED → PAID (CAS)
+    P->>X: publish payment.approved
     P->>X: ack
+    X->>N: payment.approved
 
-    X->>E: pagamento.aprovado
-    X->>N: pagamento.aprovado
-    E->>DB: UPDATE produtos (atômico)
-    E->>X: publish estoque.reservado
-    E->>X: ack
-
-    X->>N: estoque.reservado
-    N->>DB: UPDATE pedido (status CONCLUIDO)
-    N->>X: ack
+    Note over X,S: 120 s depois, reservation.expired volta a fila stock
+    S->>DB: CAS RESERVED → EXPIRED afeta 0 linhas (ja PAID), no-op

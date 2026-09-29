@@ -1,30 +1,33 @@
 flowchart TB
-    CLI([Cliente]) -->|POST /pedidos| API[api]
-    API -->|publica pedido.criado| EX{{"exchange: pedidos — tipo topic"}}
+    CLI([Cliente]) -->|"POST /carts/:id/checkout"| API[api]
+    API -->|publica order.placed| EX{{"exchange: orders — tipo topic"}}
 
-    EX -->|pedido.criado| QP[[fila: pagamento]]
-    EX -->|pagamento.aprovado| QE[[fila: estoque]]
-    EX -->|"#  (todos os eventos)"| QN[[fila: notificacao]]
+    EX -->|"order.placed<br/>payment.declined<br/>reservation.expired"| QS[[fila: stock]]
+    EX -->|reservation.created| QP[[fila: payment]]
+    EX -->|"#  (todos os eventos)"| QN[[fila: notification]]
 
     subgraph W["processo worker — escalavel para N replicas"]
         direction LR
-        HP[handler<br/>pagamento]
-        HE[handler<br/>estoque]
-        HN[handler<br/>notificacao]
+        HS[handler<br/>stock]
+        HP[handler<br/>payment]
+        HN[handler<br/>notification]
     end
 
+    QS --> HS
     QP --> HP
-    QE --> HE
     QN --> HN
 
-    HP -.->|"publica pagamento.aprovado<br/>ou pagamento.recusado"| EX
-    HE -.->|"publica estoque.reservado<br/>ou estoque.insuficiente"| EX
+    HS -.->|"publica reservation.created<br/>ou reservation.rejected"| EX
+    HP -.->|"publica payment.approved<br/>ou payment.declined"| EX
+    HS -.->|publica reservation.expired| XE{{exchange: expiry}}
+    XE --> QX[["fila: expiry.q<br/>x-message-ttl: 120000<br/>sem consumidor"]]
+    QX -.->|"TTL expira, dead-letter<br/>routing key preservada"| EX
 
     API --> PG[(PostgreSQL)]
-    HE --> PG
-    HN --> PG
+    HS --> PG
+    HP --> PG
 
     classDef ex fill:#e8e8f5,stroke:#555
     classDef q fill:#f5f0e0,stroke:#555
-    class EX ex
-    class QP,QE,QN q
+    class EX,XE ex
+    class QP,QS,QN,QX q

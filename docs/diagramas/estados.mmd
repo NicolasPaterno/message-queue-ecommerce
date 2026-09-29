@@ -1,9 +1,12 @@
 stateDiagram-v2
-    [*] --> CRIADO
-    CRIADO --> PAGO: pagamento.aprovado
-    CRIADO --> RECUSADO: pagamento.recusado
-    PAGO --> CONCLUIDO: estoque.reservado
-    PAGO --> SEM_ESTOQUE: estoque.insuficiente
-    CONCLUIDO --> [*]
-    RECUSADO --> [*]
-    SEM_ESTOQUE --> [*]
+    [*] --> CART
+    CART --> PLACED: checkout (api)
+    PLACED --> RESERVED: order.placed, reserva ok (stock)
+    PLACED --> OUT_OF_STOCK: order.placed, sem estoque (stock)
+    RESERVED --> PAID: cobranca aprovada (payment)
+    RESERVED --> DECLINED: payment.declined (stock)
+    RESERVED --> EXPIRED: reservation.expired (stock)
+    PAID --> [*]
+    OUT_OF_STOCK --> [*]
+    DECLINED --> [*]
+    EXPIRED --> [*]
