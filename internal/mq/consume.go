@@ -27,7 +27,7 @@ func RunConsumers(ctx context.Context, url string, handlers map[string]Handler) 
 			}
 			return err
 		}
-		if err := consumeDeclare(conn); err != nil {
+		if err := declare(conn); err != nil {
 			conn.Close()
 			log.Printf("amqp: declare topology: %v", err)
 			if !sleep(ctx, &backoff) {
@@ -65,7 +65,7 @@ func RunConsumers(ctx context.Context, url string, handlers map[string]Handler) 
 	}
 }
 
-func consumeDeclare(conn *amqp.Connection) error {
+func declare(conn *amqp.Connection) error {
 	ch, err := OpenChannel(conn)
 	if err != nil {
 		return err
@@ -103,7 +103,7 @@ func consume(ctx context.Context, conn *amqp.Connection, queue string, h Handler
 			env, err := decode(d.Body)
 			if err != nil {
 				log.Printf("queue=%s id=%s -> dlq: %v", queue, d.MessageId, err)
-				consumeDLQ(hctx, ch, d)
+				ackToDLQ(hctx, ch, d)
 				continue
 			}
 			n := deathCount(d, queue)
@@ -114,7 +114,7 @@ func consume(ctx context.Context, conn *amqp.Connection, queue string, h Handler
 				d.Ack(false)
 			case errors.Is(err, ErrPermanent) || n+1 >= maxAttempts:
 				log.Printf("queue=%s id=%s -> dlq: %v", queue, env.ID, err)
-				consumeDLQ(hctx, ch, d)
+				ackToDLQ(hctx, ch, d)
 			default:
 				log.Printf("queue=%s id=%s attempt=%d failed, retry: %v", queue, env.ID, n+1, err)
 				d.Nack(false, false)
@@ -138,8 +138,8 @@ func decode(body []byte) (Envelope, error) {
 	return env, nil
 }
 
-// consumeDLQ acks only after the dlq publish is confirmed; if it fails the message goes to retry instead of being lost.
-func consumeDLQ(ctx context.Context, ch *amqp.Channel, d amqp.Delivery) {
+// ackToDLQ acks only after the dlq publish is confirmed; if it fails the message goes to retry instead of being lost.
+func ackToDLQ(ctx context.Context, ch *amqp.Channel, d amqp.Delivery) {
 	if err := toDLQ(ctx, ch, d); err != nil {
 		log.Printf("dlq publish failed, retry: %v", err)
 		d.Nack(false, false)

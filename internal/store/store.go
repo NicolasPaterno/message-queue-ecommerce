@@ -44,6 +44,7 @@ func LoadItems(ctx context.Context, q Querier, orderID string) ([]Item, error) {
 	}
 	return items, rows.Err()
 }
+
 func TotalCents(items []Item) int64 {
 	var t int64
 	for _, it := range items {

@@ -50,7 +50,7 @@ func OpenChannel(conn *amqp.Connection) (*amqp.Channel, error) {
 	return ch, nil
 }
 
-var pubQueues = []struct {
+var queues = []struct {
 	name string
 	args amqp.Table
 }{
@@ -62,7 +62,7 @@ var pubQueues = []struct {
 	{QDLQ, nil},
 }
 
-var pubBindings = []struct{ queue, key, exchange string }{
+var bindings = []struct{ queue, key, exchange string }{
 	{QStock, KeyOrderPlaced, ExOrders},
 	{QStock, KeyPaymentDeclined, ExOrders},
 	{QStock, KeyReservationExpired, ExOrders},
@@ -82,12 +82,12 @@ func DeclareTopology(ch *amqp.Channel) error {
 			return err
 		}
 	}
-	for _, q := range pubQueues {
+	for _, q := range queues {
 		if _, err := ch.QueueDeclare(q.name, true, false, false, false, q.args); err != nil {
 			return err
 		}
 	}
-	for _, b := range pubBindings {
+	for _, b := range bindings {
 		if err := ch.QueueBind(b.queue, b.key, b.exchange, false, nil); err != nil {
 			return err
 		}
