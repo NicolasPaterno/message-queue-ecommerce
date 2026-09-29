@@ -1,0 +1,219 @@
+package api
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"net/http"
+	"time"
+	"uuid"
+
+	"message-queue-ecommerce/internal/mq"
+	"message-queue-ecommerce/internal/store"
+)
+
+var (
+	errBadRequest  = errors.New("bad request")
+	errNotFound    = errors.New("not found")
+	errConflict    = errors.New("conflict")
+	errUnavailable = errors.New("broker unavailable")
+)
+
+type server struct {
+	db  *sql.DB
+	pub *mq.Publisher
+}
+
+func Run(ctx context.Context, db *sql.DB, amqpURL string) error {
+	pub, err := mq.NewPublisher(ctx, amqpURL)
+	if err != nil {
+		return err
+	}
+	defer pub.Close()
+	s := &server{db: db, pub: pub}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /carts", handle(s.createCart))
+	mux.HandleFunc("POST /carts/{id}/items", handle(s.addItem))
+	mux.HandleFunc("POST /carts/{id}/checkout", handle(s.checkout))
+	mux.HandleFunc("GET /orders/{id}", handle(s.getOrder))
+
+	srv := &http.Server{Addr: ":8080", Handler: mux}
+	errc := make(chan error, 1)
+	go func() { errc <- srv.ListenAndServe() }()
+	log.Println("api: listening on :8080")
+	select {
+	case err := <-errc:
+		return err
+	case <-ctx.Done():
+	}
+	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return srv.Shutdown(sctx)
+}
+
+// handle maps the sentinel errors to status codes in one place; anything else is a logged 500.
+func handle(h func(r *http.Request) (int, any, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		code, body, err := h(r)
+		if err != nil {
+			switch {
+			case errors.Is(err, errBadRequest):
+				code = http.StatusBadRequest
+			case errors.Is(err, errNotFound):
+				code = http.StatusNotFound
+			case errors.Is(err, errConflict):
+				code = http.StatusConflict
+			case errors.Is(err, errUnavailable):
+				code = http.StatusServiceUnavailable
+			default:
+				log.Printf("api: %s %s: %v", r.Method, r.URL.Path, err)
+				code, err = http.StatusInternalServerError, errors.New("internal error")
+			}
+			body = map[string]string{"error": err.Error()}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(code)
+		json.NewEncoder(w).Encode(body)
+	}
+}
+
+// parseID turns a malformed id into a 404 before it reaches Postgres, where the uuid column would reject it as a 500.
+func parseID(s string) (string, error) {
+	u, err := uuid.Parse(s)
+	if err != nil {
+		return "", fmt.Errorf("%w: %q", errNotFound, s)
+	}
+	return u.String(), nil
+}
+
+func (s *server) createCart(r *http.Request) (int, any, error) {
+	var id string
+	err := s.db.QueryRowContext(r.Context(), "INSERT INTO orders (id, status) VALUES (gen_random_uuid(), $1) RETURNING id", store.StatusCart).Scan(&id)
+	if err != nil {
+		return 0, nil, err
+	}
+	return http.StatusCreated, map[string]string{"id": id, "status": store.StatusCart}, nil
+}
+
+func (s *server) addItem(r *http.Request) (int, any, error) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		return 0, nil, err
+	}
+	var in struct {
+		ProductID string `json:"product_id"`
+		Quantity  int    `json:"quantity"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Quantity <= 0 {
+		return 0, nil, fmt.Errorf("%w: need product_id and quantity > 0", errBadRequest)
+	}
+	pid, err := parseID(in.ProductID)
+	if err != nil {
+		return 0, nil, err
+	}
+	it := store.Item{ProductID: pid, Quantity: in.Quantity}
+	err = store.WithTx(r.Context(), s.db, func(tx *sql.Tx) error {
+		if err := lockCart(r.Context(), tx, id); err != nil {
+			return err
+		}
+		err := tx.QueryRowContext(r.Context(), "SELECT price_cents FROM products WHERE id = $1", pid).Scan(&it.PriceCents)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: product %s", errNotFound, pid)
+		}
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(r.Context(), `INSERT INTO order_items (order_id, product_id, quantity, price_cents) VALUES ($1, $2, $3, $4)
+			ON CONFLICT (order_id, product_id) DO UPDATE SET quantity = EXCLUDED.quantity, price_cents = EXCLUDED.price_cents`,
+			id, pid, it.Quantity, it.PriceCents)
+		return err
+	})
+	if err != nil {
+		return 0, nil, err
+	}
+	return http.StatusCreated, it, nil
+}
+
+// checkout publishes order.placed inside the tx that moves CART→PLACED: 201 only after the broker confirms,
+// and an unconfirmed publish rolls the order back to CART (503) instead of leaving a PLACED order with no event.
+// The publish is bounded so a broker outage fails fast instead of holding the cart's row lock.
+func (s *server) checkout(r *http.Request) (int, any, error) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		return 0, nil, err
+	}
+	ctx := r.Context()
+	err = store.WithTx(ctx, s.db, func(tx *sql.Tx) error {
+		if err := lockCart(ctx, tx, id); err != nil {
+			return err
+		}
+		items, err := store.LoadItems(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if len(items) == 0 {
+			return fmt.Errorf("%w: cart is empty", errConflict)
+		}
+		if _, err := store.CASStatus(ctx, tx, id, store.StatusCart, store.StatusPlaced); err != nil {
+			return err
+		}
+		env, err := mq.NewEnvelope(mq.KeyOrderPlaced, id, nil)
+		if err != nil {
+			return err
+		}
+		pctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if err := s.pub.Publish(pctx, mq.ExOrders, env); err != nil {
+			return fmt.Errorf("%w: %v", errUnavailable, err)
+		}
+		log.Printf("api: order.placed id=%s order_id=%s", env.ID, id)
+		return nil
+	})
+	if err != nil {
+		return 0, nil, err
+	}
+	return http.StatusCreated, map[string]string{"id": id, "status": store.StatusPlaced}, nil
+}
+
+func (s *server) getOrder(r *http.Request) (int, any, error) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		return 0, nil, err
+	}
+	var status string
+	err = s.db.QueryRowContext(r.Context(), "SELECT status FROM orders WHERE id = $1", id).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil, fmt.Errorf("%w: order %s", errNotFound, id)
+	}
+	if err != nil {
+		return 0, nil, err
+	}
+	items, err := store.LoadItems(r.Context(), s.db, id)
+	if err != nil {
+		return 0, nil, err
+	}
+	if items == nil {
+		items = []store.Item{}
+	}
+	return http.StatusOK, map[string]any{"id": id, "status": status, "items": items, "total_cents": store.TotalCents(items)}, nil
+}
+
+// lockCart row-locks the order until the tx ends, so concurrent add-item/checkout on one cart serialize.
+func lockCart(ctx context.Context, tx *sql.Tx, id string) error {
+	var status string
+	err := tx.QueryRowContext(ctx, "SELECT status FROM orders WHERE id = $1 FOR UPDATE", id).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: cart %s", errNotFound, id)
+	}
+	if err != nil {
+		return err
+	}
+	if status != store.StatusCart {
+		return fmt.Errorf("%w: order is %s, not %s", errConflict, status, store.StatusCart)
+	}
+	return nil
+}
