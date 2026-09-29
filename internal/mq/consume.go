@@ -14,7 +14,10 @@ import (
 
 // RunConsumers runs one consume goroutine per queue on a shared connection, reconnects with backoff on loss,
 // and on ctx done waits for in-flight messages before returning nil.
+// A failed pass waits before retrying: Connect only backs off when the dial fails, so a reachable broker that
+// refuses the declare or a consumer (e.g. ACCESS_REFUSED) would otherwise spin in a tight loop.
 func RunConsumers(ctx context.Context, url string, handlers map[string]Handler) error {
+	backoff := time.Second
 	for {
 		conn, err := Connect(ctx, url)
 		if err != nil {
@@ -26,7 +29,7 @@ func RunConsumers(ctx context.Context, url string, handlers map[string]Handler) 
 		if err := consumeDeclare(conn); err != nil {
 			conn.Close()
 			log.Printf("amqp: declare topology: %v", err)
-			if ctx.Err() != nil {
+			if !sleep(ctx, &backoff) {
 				return nil
 			}
 			continue
@@ -49,12 +52,13 @@ func RunConsumers(ctx context.Context, url string, handlers map[string]Handler) 
 		case <-ctx.Done():
 		case err := <-closed:
 			log.Printf("amqp: connection closed: %v", err)
+			backoff = time.Second
 		case <-cctx.Done():
 		}
 		cancel()
 		wg.Wait()
 		conn.Close()
-		if ctx.Err() != nil {
+		if !sleep(ctx, &backoff) {
 			return nil
 		}
 	}

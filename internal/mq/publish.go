@@ -20,13 +20,21 @@ func Connect(ctx context.Context, url string) (*amqp.Connection, error) {
 			return conn, nil
 		}
 		log.Printf("amqp: connect failed, retry in %s: %v", backoff, err)
-		select {
-		case <-ctx.Done():
+		if !sleep(ctx, &backoff) {
 			return nil, ctx.Err()
-		case <-time.After(backoff):
 		}
-		backoff = min(backoff*2, 30*time.Second)
 	}
+}
+
+// sleep waits *d, then doubles it up to 30s; false means ctx ended first.
+func sleep(ctx context.Context, d *time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(*d):
+	}
+	*d = min(*d*2, 30*time.Second)
+	return true
 }
 
 // OpenChannel opens a channel in publisher-confirm mode, so every Publish on it waits for the broker ack.
