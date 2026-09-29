@@ -4,15 +4,15 @@ Trabalho prático da disciplina de Sistemas Distribuídos. O projeto demonstra o
 
 ## Cenário
 
-O sistema processa pedidos de e-commerce em quatro etapas: registrar o pedido, cobrar o pagamento, reservar o estoque e notificar o cliente. Essas etapas têm latências e dependências externas muito diferentes, o que motiva desacoplá-las com um broker de mensagens em vez de executá-las de forma síncrona.
+O sistema processa pedidos de e-commerce em quatro etapas: registrar o pedido (o carrinho vira pedido no checkout), reservar temporariamente o estoque, cobrar o pagamento e notificar o cliente. O estoque é reservado antes da cobrança para que nenhum cliente pague por um produto que acabou; se o pagamento não se concluir no prazo, a reserva expira. Essas etapas têm latências e dependências externas muito diferentes, o que motiva desacoplá-las com um broker de mensagens em vez de executá-las de forma síncrona.
 
 Detalhes da justificativa em [`docs/etapa1.md`](docs/etapa1.md).
 
 ## Arquitetura
 
-Dois processos (`api` e `worker`), um broker RabbitMQ e um banco PostgreSQL. A API publica o evento `pedido.criado` em um exchange do tipo `topic`; os handlers do `worker` (pagamento, estoque, notificação) consomem e publicam os eventos seguintes, encadeando o fluxo sem se conhecerem diretamente.
+Dois processos (`api` e `worker`), um broker RabbitMQ e um banco PostgreSQL. No checkout, a API publica o evento `order.placed` em um exchange do tipo `topic`; o handler `stock` reserva as unidades e publica `reservation.created`, que o handler `payment` consome para cobrar. Os handlers do `worker` (estoque, pagamento, notificação) encadeiam o fluxo sem se conhecerem diretamente.
 
-Inclui estratégias de escalabilidade (competing consumers), confiabilidade (publisher confirms, ack manual, idempotência) e tolerância a falhas (retry com TTL, dead letter queue).
+Inclui estratégias de escalabilidade (competing consumers), confiabilidade (publisher confirms, ack manual, idempotência) e tolerância a falhas (retry com TTL, dead letter queue, expiração da reserva com TTL + dead lettering).
 
 Detalhes completos, diagramas e justificativa de decisões em [`docs/etapa2.md`](docs/etapa2.md).
 
