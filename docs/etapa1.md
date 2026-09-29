@@ -12,24 +12,30 @@ O domínio escolhido é o **comércio eletrônico** — especificamente, o backe
 processamento de pedidos de uma loja virtual que vende produtos físicos.
 
 Quando um cliente finaliza uma compra, o sistema precisa executar quatro
-responsabilidades: **registrar o pedido**, **cobrar o pagamento**, **reservar o
-estoque** e **notificar o cliente**. Elas são tratadas hoje como uma operação
-única e indivisível, mas têm características de execução muito diferentes:
+responsabilidades, nesta ordem: **registrar o pedido** (o carrinho vira pedido
+no checkout), **reservar o estoque**, **cobrar o pagamento** e **notificar o
+cliente**. Elas são tratadas hoje como uma operação única e indivisível, mas têm
+características de execução muito diferentes:
 
 | Responsabilidade | Latência | Depende de terceiro | Crítica para a venda |
 |---|---|---|---|
 | Registrar o pedido | ~50 ms | Não | **Sim** |
-| Cobrar o pagamento | 1 a 10 s | **Sim** (gateway) | **Sim** |
 | Reservar o estoque | ~100 ms | Não | **Sim** |
+| Cobrar o pagamento | 1 a 10 s | **Sim** (gateway) | **Sim** |
 | Notificar o cliente | 1 a 5 s | **Sim** (provedor de e-mail) | Não |
 
 
-Dois requisitos de negócio delimitam o problema:
+Três requisitos de negócio delimitam o problema:
 
 - **Nenhum pedido pode ser perdido.** O pedido é o evento de maior valor da
   operação.
 - **A confirmação ao cliente precisa ser imediata.** Espera no checkout aumenta
   o abandono de carrinho.
+- **Nenhum cliente é cobrado por um produto que não existe.** Com clientes
+  comprando ao mesmo tempo, a última unidade é de quem a reservou primeiro — por
+  isso o estoque é reservado **antes** da cobrança. A reserva é temporária: se o
+  pagamento não se concluir no prazo, ela expira e a unidade volta à venda, para
+  que um checkout abandonado não prenda estoque.
 
 ---
 
@@ -41,9 +47,9 @@ Na implementação síncrona, a requisição de checkout executa as quatro etapa
 sequência e só responde ao final:
 
 ```
-POST /pedidos ──► grava ──► cobra ──► baixa estoque ──► envia e-mail ──► 201
-                  (50ms)     (8s)        (100ms)            (3s)
-                  └────────── cliente esperando 11 s ──────────┘
+POST /checkout ──► grava ──► reserva estoque ──► cobra ──► envia e-mail ──► 201
+                   (50ms)       (100ms)          (8s)         (3s)
+                   └──────────── cliente esperando 11 s ─────────────┘
 ```
 
 Disso decorrem cinco problemas concretos:
@@ -77,14 +83,13 @@ processamento. A API apenas registra o pedido e **publica um evento**; as demais
 etapas consomem esse evento de forma independente.
 
 ```
-POST /pedidos ──► grava ──► publica evento ──► 201 Created   (~150 ms)
-                                   │
-                                   ▼
-                            [ RabbitMQ ]
-                                   │
-                  ┌────────────────┼────────────────┐
-                  ▼                ▼                ▼
-             pagamento          estoque        notificação
+POST /checkout ──► grava ──► publica evento ──► 201 Created   (~150 ms)
+                                    │
+                                    ▼
+                             [ RabbitMQ ] ──────────────► notificação
+                                    │                   (recebe todos
+                                    ▼                     os eventos)
+                          estoque (reserva) ──► pagamento
 ```
 
 Cada problema é resolvido por uma propriedade específica do broker:
