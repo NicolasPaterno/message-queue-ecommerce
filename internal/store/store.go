@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -72,8 +73,19 @@ func MarkProcessed(ctx context.Context, tx *sql.Tx, id string) (bool, error) {
 }
 
 // CASStatus moves the order from → to only if it is still in from; false means another transition won.
+// It locks the row before comparing: a plain UPDATE ... WHERE status=from skips a row whose committed status
+// differs without waiting, even while another tx is about to commit status=from (checkout publishes order.placed
+// before its commit). SELECT ... FOR UPDATE waits for that tx and then reads the committed status.
 func CASStatus(ctx context.Context, tx *sql.Tx, orderID, from, to string) (bool, error) {
-	return affectedOne(tx.ExecContext(ctx, "UPDATE orders SET status=$3, updated_at=now() WHERE id=$1 AND status=$2", orderID, from, to))
+	var status string
+	err := tx.QueryRowContext(ctx, "SELECT status FROM orders WHERE id=$1 FOR UPDATE", orderID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && status != from) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return affectedOne(tx.ExecContext(ctx, "UPDATE orders SET status=$2, updated_at=now() WHERE id=$1", orderID, to))
 }
 
 func affectedOne(res sql.Result, err error) (bool, error) {
