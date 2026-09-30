@@ -40,6 +40,7 @@ func Run(ctx context.Context, db *sql.DB, amqpURL string) error {
 	mux.HandleFunc("POST /carts/{id}/items", handle(s.addItem))
 	mux.HandleFunc("POST /carts/{id}/checkout", handle(s.checkout))
 	mux.HandleFunc("GET /orders/{id}", handle(s.getOrder))
+	mux.HandleFunc("GET /products", handle(s.listProducts))
 
 	srv := &http.Server{Addr: ":8080", Handler: mux}
 	errc := make(chan error, 1)
@@ -200,6 +201,29 @@ func (s *server) getOrder(r *http.Request) (int, any, error) {
 		items = []store.Item{}
 	}
 	return http.StatusOK, map[string]any{"id": id, "status": status, "items": items, "total_cents": store.TotalCents(items)}, nil
+}
+
+func (s *server) listProducts(r *http.Request) (int, any, error) {
+	type product struct {
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		PriceCents int64  `json:"price_cents"`
+		Available  int    `json:"available"`
+	}
+	rows, err := s.db.QueryContext(r.Context(), "SELECT id, name, price_cents, available FROM products ORDER BY name")
+	if err != nil {
+		return 0, nil, err
+	}
+	defer rows.Close()
+	out := []product{}
+	for rows.Next() {
+		var p product
+		if err := rows.Scan(&p.ID, &p.Name, &p.PriceCents, &p.Available); err != nil {
+			return 0, nil, err
+		}
+		out = append(out, p)
+	}
+	return http.StatusOK, out, rows.Err()
 }
 
 // lockCart row-locks the order until the tx ends, so concurrent add-item/checkout on one cart serialize.

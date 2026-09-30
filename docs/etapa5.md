@@ -34,7 +34,7 @@ internal/store/store.go                 status do pedido, Item, LoadItems, Total
 internal/stock/stock.go                 stock.Handler: reserve / release
 internal/payment/payment.go             payment.Handler
 internal/notification/notification.go   notification.Handler
-internal/api/api.go                     api.Run: 4 rotas HTTP
+internal/api/api.go                     api.Run: 5 rotas HTTP
 Dockerfile                              build em duas etapas; imagem final distroless
 deploy/docker-compose.yml               rabbitmq, postgres, api, worker
 deploy/init.sql                         esquema e produto de exemplo
@@ -127,6 +127,7 @@ JSON na entrada e na saída; sem autenticação.
 | POST | `/carts/{id}/items` | `{"product_id":"uuid","quantity":1}` | `201` com o item (`product_id`, `quantity`, `price_cents`); repetir o produto substitui a quantidade | `404` carrinho ou produto inexistente · `409` pedido não está em `CART` · `400` corpo inválido ou `quantity <= 0` |
 | POST | `/carts/{id}/checkout` | — | `201 {"id":"uuid","status":"PLACED"}` depois do confirm do broker | `404` · `409` não está em `CART` ou carrinho vazio · `503` broker não confirmou (pedido continua `CART`) |
 | GET | `/orders/{id}` | — | `200 {"id","status","items":[{"product_id","quantity","price_cents"}],"total_cents"}` | `404` |
+| GET | `/products` | — | `200 [{"id","name","price_cents","available"}]`, ordenado por `name` | — |
 
 O checkout **não** verifica estoque: a reserva atômica no `stock` é o único
 controle, e o resultado (`RESERVED`, `OUT_OF_STOCK`, `PAID`, `DECLINED`,

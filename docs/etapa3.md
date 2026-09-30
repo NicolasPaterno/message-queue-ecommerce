@@ -156,8 +156,12 @@ inicialização do broker via `load_definitions`:
 # deploy/docker-compose.yml (serviço rabbitmq)
 volumes: ["./definitions.json:/etc/rabbitmq/definitions.json:ro"]
 environment:
-  RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: '-rabbit load_definitions "/etc/rabbitmq/definitions.json"'
+  RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: '-rabbit load_definitions "/etc/rabbitmq/definitions.json" -rabbit collect_statistics_interval 1000 -rabbitmq_management_agent sample_retention_policies [{global,[{605,1}]},{basic,[{605,1}]},{detailed,[{605,1}]}]'
 ```
+
+Os dois últimos argumentos só afetam a Management API: estatísticas coletadas
+e amostradas a cada 1 s (o padrão é 5 s), para que o Mapa de Mensagens (`web/`)
+mostre cada mensagem cerca de 1 s depois de ela passar pela fila.
 
 ```json
 "users": [

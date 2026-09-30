@@ -5,7 +5,7 @@ services:
     ports: ["5672:5672", "15672:15672"]
     volumes: ["./definitions.json:/etc/rabbitmq/definitions.json:ro"]
     environment:
-      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: '-rabbit load_definitions "/etc/rabbitmq/definitions.json"'
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: '-rabbit load_definitions "/etc/rabbitmq/definitions.json" -rabbit collect_statistics_interval 1000 -rabbitmq_management_agent sample_retention_policies [{global,[{605,1}]},{basic,[{605,1}]},{detailed,[{605,1}]}]'
 
   postgres:
     image: postgres:16
