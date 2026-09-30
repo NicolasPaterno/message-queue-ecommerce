@@ -1,0 +1,11 @@
+{
+  "users": [
+    {"name": "api", "password": "api", "tags": ""},
+    {"name": "worker", "password": "worker", "tags": "management"}
+  ],
+  "vhosts": [{"name": "/shop"}],
+  "permissions": [
+    {"user": "api", "vhost": "/shop", "configure": "^(orders|retry|dlx|expiry|stock|payment|notification|retry\\.q|expiry\\.q|dlq)$", "write": "^(orders|retry|dlx|expiry|stock|payment|notification|retry\\.q|expiry\\.q|dlq)$", "read": "^(orders|retry|dlx|expiry|stock|payment|notification|retry\\.q|expiry\\.q|dlq)$"},
+    {"user": "worker", "vhost": "/shop", "configure": "^(orders|retry|dlx|expiry|stock|payment|notification|retry\\.q|expiry\\.q|dlq)$", "write": "^(orders|retry|dlx|expiry|stock|payment|notification|retry\\.q|expiry\\.q|dlq)$", "read": "^(orders|retry|dlx|expiry|stock|payment|notification|retry\\.q|expiry\\.q|dlq)$"}
+  ]
+}

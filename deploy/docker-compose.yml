@@ -1,0 +1,32 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    hostname: rabbitmq
+    ports: ["5672:5672", "15672:15672"]
+    volumes: ["./definitions.json:/etc/rabbitmq/definitions.json:ro"]
+    environment:
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: '-rabbit load_definitions "/etc/rabbitmq/definitions.json"'
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shop
+      POSTGRES_DB: shop
+    volumes: ["./init.sql:/docker-entrypoint-initdb.d/init.sql"]
+
+  api:
+    build: ..
+    command: ["/app", "api"]
+    ports: ["8080:8080"]
+    environment:
+      AMQP_URL: amqp://api:api@rabbitmq:5672/%2Fshop
+      DB_URL: postgres://shop:shop@postgres:5432/shop?sslmode=disable
+
+  worker:
+    build: ..
+    command: ["/app", "worker"]
+    environment:
+      AMQP_URL: amqp://worker:worker@rabbitmq:5672/%2Fshop
+      DB_URL: postgres://shop:shop@postgres:5432/shop?sslmode=disable
+      FAIL_RATE: ${FAIL_RATE:-0}
