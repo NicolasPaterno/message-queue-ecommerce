@@ -35,11 +35,14 @@ export function explain(e: OrderEvent, status: OrderStatus): string {
   return `${e.queue} ${e.outcome}`;
 }
 
+// Demo-only payment failure for one order: once (retry recovers) or always (3 attempts → dlq → expiry).
+export type Simulate = "payment_once" | "payment_always";
+
 // Cart → item → checkout. Resolves after the broker confirmed order.placed (201); errors read "503 broker unavailable".
-export async function placeOrder(productId: string, quantity: number): Promise<{ id: string }> {
+export async function placeOrder(productId: string, quantity: number, simulate?: Simulate): Promise<{ id: string }> {
   const { id } = await call("POST", "/carts");
   await call("POST", `/carts/${id}/items`, { product_id: productId, quantity });
-  await call("POST", `/carts/${id}/checkout`);
+  await call("POST", `/carts/${id}/checkout`, simulate && { simulate });
   return { id };
 }
 
@@ -47,6 +50,7 @@ export interface TrackedOrder {
   key: number; // local, the order id is unknown until the cart exists
   id?: string;
   quantity: number;
+  simulate?: Simulate;
   startedAt: number; // ms, click time
   steps: { status: OrderStatus; at: number }[]; // appended when the polled status changes
   events: OrderEvent[]; // replaced on each poll; [] until the first

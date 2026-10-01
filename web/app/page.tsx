@@ -6,7 +6,7 @@ import DlqPanel from "@/components/DlqPanel";
 import FlowMap from "@/components/FlowMap";
 import Sidebar from "@/components/Sidebar";
 import { useLive } from "@/lib/live";
-import { getOrder, placeOrder, type OrderEvent, type OrderStatus, type TrackedOrder } from "@/lib/shop";
+import { getOrder, placeOrder, type OrderEvent, type OrderStatus, type Simulate, type TrackedOrder } from "@/lib/shop";
 
 const TRACK_MS = 700;
 const GIVE_UP_MS = 150_000; // > the 120 s reservation TTL
@@ -28,18 +28,18 @@ export default function Page() {
     current.current = orders;
   });
 
-  const onOrder = (quantity: number, times = 1) => {
+  const onOrder = (quantity: number, times = 1, simulate?: Simulate) => {
     const productId = products[0]?.id;
     if (!productId) return;
     for (let i = 0; i < times; i++) {
       const key = nextKey++;
       const startedAt = performance.now();
-      placeOrder(productId, quantity)
+      placeOrder(productId, quantity, simulate)
         .then(({ id }) => {
           noteCheckout();
-          return { key, id, quantity, startedAt, steps: [{ status: "PLACED" as OrderStatus, at: performance.now() }], events: [] };
+          return { key, id, quantity, simulate, startedAt, steps: [{ status: "PLACED" as OrderStatus, at: performance.now() }], events: [] };
         })
-        .catch((e: Error) => ({ key, quantity, startedAt, steps: [], events: [], error: e.message }))
+        .catch((e: Error) => ({ key, quantity, simulate, startedAt, steps: [], events: [], error: e.message }))
         .then((o: TrackedOrder) => setOrders((os) => [o, ...os].slice(0, MAX_ROWS)));
     }
   };

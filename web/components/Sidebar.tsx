@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
-import { explain, restock, type OrderEvent, type OrderStatus, type Outcome, type Product, type TrackedOrder } from "@/lib/shop";
+import { explain, restock, type OrderEvent, type OrderStatus, type Outcome, type Product, type Simulate, type TrackedOrder } from "@/lib/shop";
 
 const CHIP: Record<OrderStatus, string> = {
   CART: "border-ink text-ink",
@@ -36,7 +36,7 @@ export default function Sidebar({
   online: boolean;
   orders: TrackedOrder[];
   announce: string;
-  onOrder: (quantity: number, times?: number) => void;
+  onOrder: (quantity: number, times?: number, simulate?: Simulate) => void;
 }) {
   const [stockErr, setStockErr] = useState<{ id: string; msg: string }>();
   const add = (id: string, n: number) =>
@@ -50,6 +50,10 @@ export default function Sidebar({
     { label: "Novo pedido", sub: "1 unidade", run: () => onOrder(1) },
     { label: "Rajada ×5", sub: "5 pedidos simultâneos", run: () => onOrder(1, 5) },
     { label: "Sem estoque", sub: p ? `${p.available + 1} unidades (estoque + 1)` : "—", run: () => p && onOrder(p.available + 1) },
+  ];
+  const failures = [
+    { label: "Pagamento falha 1×", sub: "retry → recupera", run: () => onOrder(1, 1, "payment_once") },
+    { label: "Pagamento sempre falha", sub: "3× → dlq → expira em 120 s", run: () => onOrder(1, 1, "payment_always") },
   ];
   return (
     <aside className="flex min-h-0 flex-col gap-6 overflow-y-auto border-r-2 border-ink/10 bg-paper/80 p-6">
@@ -70,6 +74,16 @@ export default function Sidebar({
             disabled={off}
             className={`${BTN} px-4 py-2.5 text-left`}
           >
+            <span className="block font-semibold">{a.label}</span>
+            <span className="block font-mono text-[11px] opacity-70">{a.sub}</span>
+          </button>
+        ))}
+      </section>
+
+      <section className="flex flex-col gap-2" aria-label="Falhas">
+        <h2 className="text-sm font-extrabold tracking-widest text-muted uppercase">Falhas</h2>
+        {failures.map((a) => (
+          <button key={a.label} onClick={a.run} disabled={off} className={`${BTN} px-4 py-2.5 text-left`}>
             <span className="block font-semibold">{a.label}</span>
             <span className="block font-mono text-[11px] opacity-70">{a.sub}</span>
           </button>
@@ -111,7 +125,7 @@ export default function Sidebar({
         {orders.length === 0 && <p className="font-mono text-xs text-muted">Nenhum pedido ainda — clique em Novo pedido.</p>}
         <ol className="flex flex-col gap-2">
           {orders.map((o) => (
-            <OrderRow key={o.key} o={o} />
+            <OrderRow key={o.key} o={o} initialOpen={!!o.simulate} />
           ))}
         </ol>
       </section>
@@ -143,6 +157,7 @@ function OrderRow({ o, initialOpen = false }: { o: TrackedOrder; initialOpen?: b
         )}
         <span className="font-semibold">{o.id?.slice(0, 8) ?? "—"}</span>
         <span className="text-muted">×{o.quantity}</span>
+        {o.simulate && <span className="text-line-retry">{o.simulate === "payment_once" ? "falha 1×" : "sempre falha"}</span>}
         {o.error ? (
           <span className="ml-auto text-line-dlx">{o.error}</span>
         ) : (
