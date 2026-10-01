@@ -20,3 +20,14 @@ export async function placeOrder(productId: string, quantity: number): Promise<{
   await call("POST", `/carts/${id}/checkout`);
   return { id };
 }
+
+export const TERMINAL: ReadonlySet<OrderStatus> = new Set(["PAID", "DECLINED", "OUT_OF_STOCK", "EXPIRED"]);
+
+export interface TrackedOrder {
+  key: number; // local, the order id is unknown until the cart exists
+  id?: string;
+  quantity: number;
+  startedAt: number; // ms, click time
+  steps: { status: OrderStatus; at: number }[]; // appended when the polled status changes
+  error?: string; // "503 broker unavailable"
+}

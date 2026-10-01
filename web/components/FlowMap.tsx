@@ -25,7 +25,7 @@ const FILL: Record<Line, string> = {
 
 // Hops of one poll are drawn as a wave in causal order: out of a TTL queue → into a queue → to the worker → out of the worker.
 const STAGE: Record<EdgeId, number> = {
-  "client-api": 0, "api-orders": 0, "retryq-orders": 0, "expiryq-orders": 0,
+  "client-api": 0, "api-orders": 1, "retryq-orders": 0, "expiryq-orders": 0,
   "orders-stock": 1, "orders-payment": 1, "orders-notification": 1,
   "stock-worker": 2, "payment-worker": 2, "notification-worker": 2,
   "worker-orders": 3, "worker-expiry": 3, "bus-retry": 3, "bus-dlq": 3,
@@ -63,6 +63,7 @@ export default function FlowMap({
 }) {
   const reduce = useReducedMotion();
   const [seen, setSeen] = useState(hops);
+  const [lastId, setLastId] = useState(() => hops.at(-1)?.id ?? -1);
   const [tokens, setTokens] = useState<Tok[]>([]);
   const [flash, setFlash] = useState<Partial<Record<keyof typeof LANES, number>>>({});
   const [pulses, setPulses] = useState<number[]>([]);
@@ -70,8 +71,10 @@ export default function FlowMap({
   // New poll → queue its tokens (adjusting state during render, no effect needed).
   // A hidden tab pauses animations; skip its tokens instead of replaying a backlog on return.
   if (hops !== seen) {
+    const fresh = hops.filter((h) => h.id > lastId);
     setSeen(hops);
-    if (!reduce && hops.length && !document.hidden) setTokens((t) => [...t, ...schedule(hops)].slice(-MAX_TOKENS));
+    setLastId(hops.at(-1)?.id ?? lastId);
+    if (!reduce && fresh.length && !document.hidden) setTokens((t) => [...t, ...schedule(fresh)].slice(-MAX_TOKENS));
   }
 
   const arrived = useCallback((tok: Tok) => {

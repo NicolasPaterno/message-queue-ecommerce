@@ -4,10 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { diff, parse, type EdgeId, type Snapshot, type Totals } from "./flow";
 import { getProducts, type Product } from "./shop";
 
-export interface LiveHop { id: number; edge: EdgeId }
+export interface LiveHop { id: number; edge: EdgeId } // ids only grow; consumers draw the ids they haven't seen
 
 const POLL_MS = 1000;
 const MAX_PER_EDGE = 20; // a burst can't flood the DOM
+const KEEP = 100;
 const QUEUES_URL = "/mq/queues/%2Fshop?columns=name,messages,messages_ready,messages_unacknowledged,consumers,message_stats.publish,message_stats.deliver_get,message_stats.ack";
 const ORDERS_URL = "/mq/exchanges/%2Fshop/orders?columns=message_stats.publish_in";
 
@@ -40,7 +41,7 @@ export function useLive() {
         high.current = r.high;
         prev.current = next;
         const fresh = r.hops.flatMap((h) => Array.from({ length: Math.min(h.n, MAX_PER_EDGE) }, () => h.edge));
-        setHops(fresh.map((edge) => ({ id: nextId++, edge })));
+        if (fresh.length) setHops((h) => [...h, ...fresh.map((edge) => ({ id: nextId++, edge }))].slice(-KEEP));
         failures.current = 0;
         setSnap(next);
         setProducts(prods);
@@ -57,8 +58,10 @@ export function useLive() {
     };
   }, []);
 
+  // A 201 checkout: the API's publish is drawn now (the broker stats can't tell it from the worker's).
   const noteCheckout = useCallback(() => {
     checkouts.current++;
+    setHops((h) => [...h, { id: nextId++, edge: "client-api" as const }, { id: nextId++, edge: "api-orders" as const }].slice(-KEEP));
   }, []);
 
   return { snap, hops, products, online, noteCheckout };
