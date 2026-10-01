@@ -17,5 +17,16 @@ CREATE TABLE order_items (
   PRIMARY KEY (order_id, product_id)
 );
 CREATE TABLE processed_messages (id UUID PRIMARY KEY);  -- idempotency
+CREATE TABLE order_events (  -- one row per delivery outcome, written by the worker (best-effort)
+  id BIGSERIAL PRIMARY KEY,
+  order_id UUID NOT NULL,    -- no FK: recording must never fail on the order row
+  at TIMESTAMPTZ NOT NULL,   -- when the worker received the delivery
+  queue TEXT NOT NULL,
+  type TEXT NOT NULL,
+  attempt INT NOT NULL,
+  outcome TEXT NOT NULL,     -- ack | retry | dlq
+  error TEXT
+);
+CREATE INDEX ON order_events (order_id);
 INSERT INTO products (id, name, price_cents, available)
   VALUES (gen_random_uuid(), 'Keyboard', 24990, 10);

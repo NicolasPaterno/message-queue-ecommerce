@@ -13,11 +13,20 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+// Event is one delivery outcome as consume decided it. At is the receive time, not the decision time:
+// a handler publishes before it acks, so the next queue's delivery can finish first; receive time keeps cause before effect.
+type Event struct {
+	At                   time.Time
+	Queue, Type, OrderID string
+	Attempt              int64  // 1-based
+	Outcome, Error       string // ack | retry | dlq; Error empty on ack
+}
+
 // RunConsumers runs one consume goroutine per queue on a shared connection, reconnects with backoff on loss,
 // and on ctx done waits for in-flight messages before returning nil.
 // A failed pass waits before retrying: Connect only backs off when the dial fails, so a reachable broker that
 // refuses a consumer (e.g. ACCESS_REFUSED, or a queue missing from definitions.json) would otherwise spin in a tight loop.
-func RunConsumers(ctx context.Context, url string, handlers map[string]Handler) error {
+func RunConsumers(ctx context.Context, url string, handlers map[string]Handler, record func(context.Context, Event)) error {
 	backoff := time.Second
 	for {
 		conn, err := Connect(ctx, url)
@@ -34,7 +43,7 @@ func RunConsumers(ctx context.Context, url string, handlers map[string]Handler) 
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if err := consume(cctx, conn, queue, h); err != nil {
+				if err := consume(cctx, conn, queue, h, record); err != nil {
 					log.Printf("queue=%s consumer stopped: %v", queue, err)
 					cancel()
 				}
@@ -60,7 +69,8 @@ func RunConsumers(ctx context.Context, url string, handlers map[string]Handler) 
 // other failures → nack without requeue, which dead-letters to retry.q.
 // Handlers get a context that ignores cancellation so a shutdown never aborts an in-flight tx;
 // ctx is only checked between deliveries, and closing the channel requeues the unacked prefetch.
-func consume(ctx context.Context, conn *amqp.Connection, queue string, h Handler) error {
+// Every decoded delivery's outcome is reported to record.
+func consume(ctx context.Context, conn *amqp.Connection, queue string, h Handler, record func(context.Context, Event)) error {
 	ch, err := OpenChannel(conn)
 	if err != nil {
 		return err
@@ -90,17 +100,26 @@ func consume(ctx context.Context, conn *amqp.Connection, queue string, h Handler
 			}
 			n := deathCount(d, queue)
 			log.Printf("queue=%s type=%s id=%s order_id=%s attempt=%d", queue, env.Type, env.ID, env.OrderID, n+1)
+			at := time.Now()
 			err = h(hctx, ch, env)
+			ev := Event{At: at, Queue: queue, Type: env.Type, OrderID: env.OrderID, Attempt: n + 1, Outcome: "retry"}
 			switch {
 			case err == nil:
 				d.Ack(false)
+				ev.Outcome = "ack"
 			case errors.Is(err, ErrPermanent) || n+1 >= maxAttempts:
 				log.Printf("queue=%s id=%s -> dlq: %v", queue, env.ID, err)
-				ackToDLQ(hctx, ch, d)
+				if ackToDLQ(hctx, ch, d) {
+					ev.Outcome = "dlq"
+				}
 			default:
 				log.Printf("queue=%s id=%s attempt=%d failed, retry: %v", queue, env.ID, n+1, err)
 				d.Nack(false, false)
 			}
+			if err != nil {
+				ev.Error = err.Error()
+			}
+			record(hctx, ev)
 		}
 	}
 }
@@ -121,13 +140,15 @@ func decode(body []byte) (Envelope, error) {
 }
 
 // ackToDLQ acks only after the dlq publish is confirmed; if it fails the message goes to retry instead of being lost.
-func ackToDLQ(ctx context.Context, ch *amqp.Channel, d amqp.Delivery) {
+// It reports whether the message reached the dlq.
+func ackToDLQ(ctx context.Context, ch *amqp.Channel, d amqp.Delivery) bool {
 	if err := toDLQ(ctx, ch, d); err != nil {
 		log.Printf("dlq publish failed, retry: %v", err)
 		d.Nack(false, false)
-		return
+		return false
 	}
 	d.Ack(false)
+	return true
 }
 
 // deathCount reads how many times d was rejected from queue, from the x-death header the broker maintains.

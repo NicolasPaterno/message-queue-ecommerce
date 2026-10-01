@@ -42,6 +42,12 @@ func main() {
 			mq.QStock:        stock.Handler(db),
 			mq.QPayment:      payment.Handler(db, failRate),
 			mq.QNotification: notification.Handler(),
+		}, func(ctx context.Context, e mq.Event) {
+			_, err := db.ExecContext(ctx, "INSERT INTO order_events (order_id, at, queue, type, attempt, outcome, error) VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''))",
+				e.OrderID, e.At, e.Queue, e.Type, e.Attempt, e.Outcome, e.Error)
+			if err != nil {
+				log.Printf("order_events: %v", err) // best-effort: never changes the ack
+			}
 		})
 		log.Println("worker: stopped")
 	}

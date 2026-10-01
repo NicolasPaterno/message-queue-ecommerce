@@ -6,13 +6,17 @@ import DlqPanel from "@/components/DlqPanel";
 import FlowMap from "@/components/FlowMap";
 import Sidebar from "@/components/Sidebar";
 import { useLive } from "@/lib/live";
-import { TERMINAL, getOrder, placeOrder, type OrderStatus, type TrackedOrder } from "@/lib/shop";
+import { getOrder, placeOrder, type OrderEvent, type OrderStatus, type TrackedOrder } from "@/lib/shop";
 
 const TRACK_MS = 700;
 const GIVE_UP_MS = 150_000; // > the 120 s reservation TTL
 const MAX_ROWS = 12;
 
 let nextKey = 0;
+
+// A PAID/DECLINED order still has its reservation.expired coming ~120 s later, so polling stops on that event, not on the status.
+const done = (o: TrackedOrder) =>
+  o.steps.at(-1)?.status === "OUT_OF_STOCK" || o.events.some((e) => e.queue === "stock" && e.type === "reservation.expired");
 
 export default function Page() {
   const { snap, hops, products, online, noteCheckout } = useLive();
@@ -33,26 +37,42 @@ export default function Page() {
       placeOrder(productId, quantity)
         .then(({ id }) => {
           noteCheckout();
-          return { key, id, quantity, startedAt, steps: [{ status: "PLACED" as OrderStatus, at: performance.now() }] };
+          return { key, id, quantity, startedAt, steps: [{ status: "PLACED" as OrderStatus, at: performance.now() }], events: [] };
         })
-        .catch((e: Error) => ({ key, quantity, startedAt, steps: [], error: e.message }))
+        .catch((e: Error) => ({ key, quantity, startedAt, steps: [], events: [], error: e.message }))
         .then((o: TrackedOrder) => setOrders((os) => [o, ...os].slice(0, MAX_ROWS)));
     }
   };
 
-  // Follow every order still in flight until it settles.
+  // Follow every order until its last scheduled message (the reservation expiry) has been handled.
+  // ponytail: up to 12 orders × 1.4 req/s on localhost, no backoff; add one if rows ever go past 12.
   useEffect(() => {
     const t = setInterval(async () => {
       const now = performance.now();
-      const pending = current.current.filter(
-        (o) => o.id && !o.error && !TERMINAL.has(o.steps.at(-1)!.status) && now - o.startedAt < GIVE_UP_MS,
-      );
-      const seen = await Promise.all(pending.map((o) => getOrder(o.id!).then((r) => [o.id!, r.status] as const, () => null)));
-      const changed = new Map(seen.filter((s) => s && s[1] !== current.current.find((o) => o.id === s[0])?.steps.at(-1)?.status) as [string, OrderStatus][]);
+      const pending = current.current.filter((o) => o.id && !o.error && !done(o) && now - o.startedAt < GIVE_UP_MS);
+      const seen = await Promise.all(pending.map((o) => getOrder(o.id!).then((r) => ({ o, ...r }), () => null)));
+      const changed = new Map<string, { status: OrderStatus; events: OrderEvent[] }>();
+      let newest: { id: string; e: OrderEvent } | undefined;
+      for (const s of seen) {
+        if (!s || (s.status === s.o.steps.at(-1)?.status && s.events.length === s.o.events.length)) continue;
+        changed.set(s.o.id!, s);
+        const e = s.events.at(-1);
+        if (s.events.length > s.o.events.length && e && (!newest || e.at > newest.e.at)) newest = { id: s.o.id!, e };
+      }
       if (!changed.size) return;
       const at = performance.now();
-      setOrders((os) => os.map((o) => (o.id && changed.has(o.id) ? { ...o, steps: [...o.steps, { status: changed.get(o.id)!, at }] } : o)));
-      setAnnounce([...changed].map(([id, st]) => `Pedido ${id.slice(0, 8)}: ${st}`).join(". "));
+      setOrders((os) =>
+        os.map((o) => {
+          const c = o.id && changed.get(o.id);
+          if (!c) return o;
+          return { ...o, events: c.events, steps: c.status === o.steps.at(-1)?.status ? o.steps : [...o.steps, { status: c.status, at }] };
+        }),
+      );
+      if (newest) {
+        const { id, e } = newest;
+        const what = e.outcome === "retry" ? `tentativa ${e.attempt}/3 falhou` : e.outcome === "dlq" ? "→ dlq" : "ok";
+        setAnnounce(`Pedido ${id.slice(0, 8)}: ${e.queue} ${what}`);
+      }
     }, TRACK_MS);
     return () => clearInterval(t);
   }, []);

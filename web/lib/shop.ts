@@ -13,7 +13,27 @@ export const getProducts = (): Promise<Product[]> => call("GET", "/products");
 
 export const restock = (id: string, add: number): Promise<Product> => call("POST", `/products/${id}/stock`, { add });
 
-export const getOrder = (id: string): Promise<{ status: OrderStatus }> => call("GET", `/orders/${id}`);
+export type Outcome = "ack" | "retry" | "dlq";
+
+// One delivery the worker handled for an order; at is the receive time (server clock, ISO8601).
+export interface OrderEvent { at: string; queue: "stock" | "payment" | "notification"; type: string; attempt: number; outcome: Outcome; error?: string }
+
+export const getOrder = (id: string): Promise<{ status: OrderStatus; events: OrderEvent[] }> => call("GET", `/orders/${id}`);
+
+// Why the event happened, in the audience's words. First match wins; mirrors the retry/DLQ/expiry rules in internal/mq and stock.
+export function explain(e: OrderEvent, status: OrderStatus): string {
+  if (e.outcome === "retry") return `tentativa ${e.attempt}/3 falhou: ${e.error} → nack → retry.q (10 s) → orders`;
+  if (e.outcome === "dlq") return `${e.attempt}ª falha → worker publica no dlx → dlq${e.queue === "payment" ? "; pedido segue RESERVED até expirar" : ""}`;
+  if (e.queue === "notification") return `notificação (${e.type})`;
+  if (e.queue === "stock" && e.type === "order.placed")
+    return status === "OUT_OF_STOCK" ? "estoque insuficiente → reservation.rejected" : "estoque reservado → reservation.created + reservation.expired agendada (expiry.q, 120 s)";
+  if (e.queue === "payment" && e.type === "reservation.created")
+    return status === "PAID" ? "pagamento aprovado → payment.approved" : status === "DECLINED" ? "pagamento recusado → payment.declined" : "pagamento processado";
+  if (e.queue === "stock" && e.type === "payment.declined") return "reserva liberada → DECLINED";
+  if (e.queue === "stock" && e.type === "reservation.expired")
+    return status === "EXPIRED" ? "120 s em expiry.q → reserva liberada → EXPIRED" : `120 s em expiry.q; pedido já ${status} — CAS perdeu, nada liberado`;
+  return `${e.queue} ${e.outcome}`;
+}
 
 // Cart → item → checkout. Resolves after the broker confirmed order.placed (201); errors read "503 broker unavailable".
 export async function placeOrder(productId: string, quantity: number): Promise<{ id: string }> {
@@ -23,13 +43,12 @@ export async function placeOrder(productId: string, quantity: number): Promise<{
   return { id };
 }
 
-export const TERMINAL: ReadonlySet<OrderStatus> = new Set(["PAID", "DECLINED", "OUT_OF_STOCK", "EXPIRED"]);
-
 export interface TrackedOrder {
   key: number; // local, the order id is unknown until the cart exists
   id?: string;
   quantity: number;
   startedAt: number; // ms, click time
   steps: { status: OrderStatus; at: number }[]; // appended when the polled status changes
+  events: OrderEvent[]; // replaced on each poll; [] until the first
   error?: string; // "503 broker unavailable"
 }

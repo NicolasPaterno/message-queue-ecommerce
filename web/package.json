@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "NODE_EXTRA_CA_CERTS=../deploy/certs/ca.pem next start",
     "lint": "eslint",
-    "test": "node --test lib/flow.test.ts"
+    "test": "node --test lib/*.test.ts"
   },
   "dependencies": {
     "motion": "^13.4.6",

@@ -201,7 +201,37 @@ func (s *server) getOrder(r *http.Request) (int, any, error) {
 	if items == nil {
 		items = []store.Item{}
 	}
-	return http.StatusOK, map[string]any{"id": id, "status": status, "items": items, "total_cents": store.TotalCents(items)}, nil
+	events, err := s.orderEvents(r.Context(), id)
+	if err != nil {
+		return 0, nil, err
+	}
+	return http.StatusOK, map[string]any{"id": id, "status": status, "items": items, "total_cents": store.TotalCents(items), "events": events}, nil
+}
+
+type event struct {
+	At      time.Time `json:"at"`
+	Queue   string    `json:"queue"`
+	Type    string    `json:"type"`
+	Attempt int       `json:"attempt"`
+	Outcome string    `json:"outcome"`
+	Error   string    `json:"error,omitempty"`
+}
+
+func (s *server) orderEvents(ctx context.Context, id string) ([]event, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT at, queue, type, attempt, outcome, coalesce(error, '') FROM order_events WHERE order_id = $1 ORDER BY at, id", id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []event{}
+	for rows.Next() {
+		var e event
+		if err := rows.Scan(&e.At, &e.Queue, &e.Type, &e.Attempt, &e.Outcome, &e.Error); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 type product struct {

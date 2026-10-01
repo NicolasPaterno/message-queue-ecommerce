@@ -44,7 +44,7 @@ docker compose ps
 until curl -s localhost:8080/orders/x >/dev/null; do sleep 1; done
 ```
 
-`setup.sh` (uma vez) gera o que fica fora do git: CA e certificado TLS do broker (`certs/`), senhas aleatórias dos 4 usuários do RabbitMQ (`.env`), o `definitions.json` a partir de `definitions.tmpl.json` e o `web/.env.local`. `docker compose ps` deve mostrar os 4 serviços rodando: `rabbitmq`, `postgres`, `api` e `worker`. O `until` espera a API responder — ela só aceita requisições depois que o banco e o broker estão prontos (leva ~15 s na primeira vez). Todos os comandos seguintes são executados a partir de `deploy/`.
+`setup.sh` (uma vez) gera o que fica fora do git: CA e certificado TLS do broker (`certs/`), senhas aleatórias dos 4 usuários do RabbitMQ (`.env`), o `definitions.json` a partir de `definitions.tmpl.json` e o `web/.env.local`. `docker compose ps` deve mostrar os 4 serviços rodando: `rabbitmq`, `postgres`, `api` e `worker`. O `until` espera a API responder — ela só aceita requisições depois que o banco e o broker estão prontos (leva ~15 s na primeira vez). Todos os comandos seguintes são executados a partir de `deploy/`. Se o `init.sql` mudou desde o último `up`, recrie o banco com `docker compose up -d --force-recreate -V postgres` (o `-V` descarta o volume anônimo do Postgres; os dados recomeçam do zero).
 
 ### 3. Management UI do RabbitMQ
 
@@ -112,7 +112,7 @@ npm install
 npm run dev
 ```
 
-Abra `http://localhost:3000`. Os botões *Novo pedido*, *Rajada ×5* e *Sem estoque* usam a API real; a lista *Pedidos* mostra o status de cada um até o final. Clique na fila `dlq` para ver as mensagens que estão nela (sem removê-las).
+Abra `http://localhost:3000`. Os botões *Novo pedido*, *Rajada ×5* e *Sem estoque* usam a API real; a lista *Pedidos* mostra o status de cada um até o final; a seta ▸ abre a linha do tempo do pedido (cada entrega do worker: fila, tentativa, ack/retry/dlq e o motivo), com a contagem até o próximo TTL (`retry.q` 10 s, `expiry.q` 120 s). Clique na fila `dlq` para ver as mensagens que estão nela (sem removê-las).
 
 Falha, parada do worker e escala continuam no terminal (passos 6 e 7) e aparecem no mapa. Para repor o estoque, use os botões `+5` e `Repor 10` na seção Estoque da barra lateral.
 
