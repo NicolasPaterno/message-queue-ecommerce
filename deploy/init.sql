@@ -7,6 +7,7 @@ CREATE TABLE products (
 CREATE TABLE orders (  -- a cart is an order in status CART
   id UUID PRIMARY KEY,
   status TEXT NOT NULL,
+  simulate TEXT CHECK (simulate IN ('payment_once', 'payment_always')),  -- demo only; null = normal order
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE TABLE order_items (

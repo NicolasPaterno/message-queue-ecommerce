@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -143,10 +144,18 @@ func (s *server) addItem(r *http.Request) (int, any, error) {
 // checkout publishes order.placed inside the tx that moves CART→PLACED: 201 only after the broker confirms,
 // and an unconfirmed publish rolls the order back to CART (503) instead of leaving a PLACED order with no event.
 // The publish is bounded so a broker outage fails fast instead of holding the cart's row lock.
+// An optional {"simulate": ...} body marks the order for a demo payment failure (see payment.simulated).
 func (s *server) checkout(r *http.Request) (int, any, error) {
 	id, err := parseID(r.PathValue("id"))
 	if err != nil {
 		return 0, nil, err
+	}
+	var in struct {
+		Simulate string `json:"simulate"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); (err != nil && !errors.Is(err, io.EOF)) ||
+		(in.Simulate != "" && in.Simulate != "payment_once" && in.Simulate != "payment_always") {
+		return 0, nil, fmt.Errorf("%w: simulate must be payment_once or payment_always", errBadRequest)
 	}
 	ctx := r.Context()
 	err = store.WithTx(ctx, s.db, func(tx *sql.Tx) error {
@@ -162,6 +171,11 @@ func (s *server) checkout(r *http.Request) (int, any, error) {
 		}
 		if _, err := store.CASStatus(ctx, tx, id, store.StatusCart, store.StatusPlaced); err != nil {
 			return err
+		}
+		if in.Simulate != "" {
+			if _, err := tx.ExecContext(ctx, "UPDATE orders SET simulate = $2 WHERE id = $1", id, in.Simulate); err != nil {
+				return err
+			}
 		}
 		env, err := mq.NewEnvelope(mq.KeyOrderPlaced, id, nil)
 		if err != nil {

@@ -24,6 +24,10 @@ func Handler(db *sql.DB, failRate float64) mq.Handler {
 		if env.Type != mq.KeyReservationCreated {
 			return fmt.Errorf("%w: payment got %s", mq.ErrPermanent, env.Type)
 		}
+		if err := simulated(ctx, db, env.OrderID); err != nil {
+			log.Printf("payment: gateway error (simulate) order_id=%s", env.OrderID)
+			return err
+		}
 		if err := failMaybe(failRate); err != nil {
 			log.Printf("payment: gateway error (FAIL_RATE) order_id=%s", env.OrderID)
 			return err
@@ -70,6 +74,21 @@ func Handler(db *sql.DB, failRate float64) mq.Handler {
 		}
 		return nil
 	}
+}
+
+// simulated fails this order's payment on request from the web demo, independent of FAIL_RATE.
+// payment_once clears itself in the same statement, so the retry passes; payment_always stays set,
+// so every attempt fails and the third goes to the dlq (and the reservation later expires).
+// The error text matches failMaybe's so the timeline reads the same either way; a DB error here is a normal retry.
+func simulated(ctx context.Context, db *sql.DB, orderID string) error {
+	err := db.QueryRowContext(ctx, "UPDATE orders SET simulate = NULLIF(simulate, 'payment_once') WHERE id = $1 AND simulate IS NOT NULL RETURNING true", orderID).Scan(new(bool))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return errors.New("simulated gateway error")
 }
 
 func failMaybe(rate float64) error {
