@@ -10,25 +10,28 @@ sequenceDiagram
     C->>A: POST /carts, POST /carts/:id/items
     A->>DB: INSERT orders (CART) e order_items
     C->>A: POST /carts/:id/checkout
-    A->>DB: CART → PLACED
+    A->>DB: BEGIN, trava o carrinho, CART → PLACED
     A->>X: publish order.placed
     X-->>A: publisher confirm
-    A-->>C: 201 Created (~150 ms)
+    A->>DB: COMMIT
+    A-->>C: 201 Created {status: PLACED}
 
-    X->>S: order.placed
-    X->>N: order.placed
-    S->>DB: available - q (atomico) + PLACED → RESERVED, 1 transacao
-    S->>X: publish reservation.created
-    S->>X: publish reservation.expired (exchange expiry, TTL 120 s)
-    S->>X: ack
+    X->>S: order.placed (fila stock)
+    X->>N: order.placed (fila notification)
+    S->>DB: BEGIN, dedupe, CAS PLACED → RESERVED, available - q
+    S->>X: publish reservation.created (confirm)
+    S->>X: publish reservation.expired no exchange expiry (TTL 120 s)
+    S->>DB: COMMIT
+    S-->>X: ack na fila stock
 
-    X->>P: reservation.created
+    X->>P: reservation.created (fila payment)
     X->>N: reservation.created
     P->>P: cobra no gateway (simulado)
-    P->>DB: RESERVED → PAID (CAS)
-    P->>X: publish payment.approved
-    P->>X: ack
+    P->>DB: BEGIN, dedupe, CAS RESERVED → PAID
+    P->>X: publish payment.approved (confirm)
+    P->>DB: COMMIT
+    P-->>X: ack na fila payment
     X->>N: payment.approved
 
-    Note over X,S: 120 s depois, reservation.expired volta a fila stock
-    S->>DB: CAS RESERVED → EXPIRED afeta 0 linhas (ja PAID), no-op
+    Note over X,S: 120 s depois, reservation.expired volta pela expiry.q a fila stock
+    S->>DB: CAS RESERVED → EXPIRED encontra PAID: no-op

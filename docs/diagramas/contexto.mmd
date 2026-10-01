@@ -1,0 +1,13 @@
+flowchart LR
+    CLI([Cliente<br/>navegador ou app]) -->|"HTTP: carrinho e checkout"| API[api<br/>loja]
+    OP([Operador da loja]) -->|"HTTPS: Management UI<br/>usuario admin"| MQ
+    API -->|"order.placed<br/>amqps"| MQ{{RabbitMQ<br/>broker}}
+    MQ <-->|"eventos do pedido<br/>amqps"| WK[worker<br/>estoque · pagamento · notificacao]
+    API --> DB[(PostgreSQL<br/>pedidos e estoque)]
+    WK --> DB
+    WK -.->|"cobranca (simulada)"| GW[/Gateway de pagamento/]
+    WK -.->|"e-mail (simulado: log)"| EM[/Provedor de e-mail/]
+    WEB([Mapa de Mensagens<br/>usuario monitor]) -->|"HTTPS: Management API<br/>somente leitura"| MQ
+
+    classDef ext fill:#f3f3f3,stroke:#888,stroke-dasharray: 4 3
+    class GW,EM ext

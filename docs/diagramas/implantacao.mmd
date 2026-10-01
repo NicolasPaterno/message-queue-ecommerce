@@ -1,0 +1,17 @@
+flowchart TB
+    subgraph H["host (macOS / Linux) — Docker Compose"]
+        subgraph N["rede interna do Compose"]
+            API["api<br/>Go 1.27 · distroless<br/>:8080"]
+            WK["worker x N<br/>Go 1.27 · distroless"]
+            RMQ["rabbitmq:3.13-management<br/>AMQP TLS :5671 · HTTPS :15671"]
+            PG["postgres:16<br/>:5432 (interna)"]
+        end
+        WEB["web: Next.js 16 · React 19<br/>npm run dev :3000"]
+    end
+    API -->|"amqps + SSL_CERT_FILE"| RMQ
+    WK -->|"amqps + SSL_CERT_FILE"| RMQ
+    API -->|pgx| PG
+    WK -->|pgx| PG
+    WEB -->|"https 127.0.0.1:15671<br/>NODE_EXTRA_CA_CERTS"| RMQ
+    WEB -->|"http :8080"| API
+    S["deploy/setup.sh: certs/, .env, definitions.json, web/.env.local"] -.-> RMQ

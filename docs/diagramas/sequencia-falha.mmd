@@ -1,27 +1,31 @@
 sequenceDiagram
     participant X as exchange orders
+    participant Q as fila payment
     participant P as handler payment
     participant R as exchange retry
-    participant RQ as fila retry.q (TTL 10s)
+    participant RQ as fila retry.q (TTL 10 s)
     participant D as exchange dlx
     participant DLQ as fila dlq
 
-    X->>P: reservation.created (tentativa 1)
-    P->>P: erro no gateway
-    P->>X: Nack(requeue=false)
-    X->>R: dead-letter (routing key preservada)
+    X->>Q: reservation.created
+    Q->>P: entrega (tentativa 1, x-death vazio)
+    P->>P: erro no gateway, rollback
+    P-->>Q: Nack(requeue=false)
+    Q->>R: dead-letter (politica retry-dlx, routing key preservada)
     R->>RQ: enfileira
     Note over RQ: aguarda 10 s
-    RQ->>X: TTL expira → dead-letter de volta
+    RQ->>X: TTL expira, dead-letter de volta ao orders
 
-    X->>P: reservation.created (tentativa 2)
-    P->>X: Nack(requeue=false)
-    Note over RQ: aguarda mais 10 s
-    RQ->>X: volta novamente
+    X->>Q: reservation.created
+    Q->>P: entrega (tentativa 2, x-death payment/rejected = 1)
+    P->>P: erro no gateway
+    P-->>Q: Nack(requeue=false)
+    Note over RQ: mais 10 s no retry.q
 
-    X->>P: reservation.created (tentativa 3)
-    P->>P: lê header x-death → 3 tentativas
-    P->>D: publish
-    P->>X: ack
-    D->>DLQ: mensagem isolada para inspeção
-    Note over X,DLQ: pedido segue RESERVED, após 120 s a reserva expira e o estoque volta
+    X->>Q: reservation.created
+    Q->>P: entrega (tentativa 3, x-death payment/rejected = 2)
+    P->>P: erro no gateway de novo
+    P->>D: publish da mensagem original (confirm)
+    P-->>Q: ack, so depois do confirm
+    D->>DLQ: mensagem isolada para inspecao
+    Note over X,DLQ: o pedido segue RESERVED, apos 120 s a reserva expira e o estoque volta

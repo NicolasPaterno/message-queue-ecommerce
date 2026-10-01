@@ -1,0 +1,26 @@
+flowchart TB
+    EX{{exchange: orders}} --> QS[[fila: stock]]
+    EX --> QP[[fila: payment]]
+    QS -->|"ate 10 sem ack (prefetch)"| S1
+    QS --> S2
+    QS --> S3
+    QP --> P1
+    QP --> P2
+    QP -->|"ate 10 sem ack (prefetch)"| P3
+    subgraph R1["worker-1"]
+        S1[stock]
+        P1[payment]
+    end
+    subgraph R2["worker-2"]
+        S2[stock]
+        P2[payment]
+    end
+    subgraph R3["worker-3"]
+        S3[stock]
+        P3[payment]
+    end
+
+    classDef ex fill:#e8e8f5,stroke:#555
+    classDef q fill:#f5f0e0,stroke:#555
+    class EX ex
+    class QS,QP q

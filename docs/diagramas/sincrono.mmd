@@ -1,0 +1,19 @@
+sequenceDiagram
+    participant C as Cliente
+    participant A as api (sincrona)
+    participant E as estoque
+    participant G as gateway de pagamento
+    participant M as e-mail
+
+    Note over C,M: modelo sincrono hipotetico, sem broker
+    C->>A: POST checkout
+    A->>E: reservar (~50 ms)
+    E-->>A: ok
+    A->>G: cobrar (1 a 10 s)
+    G-->>A: aprovado
+    A->>M: enviar confirmacao (1 a 5 s)
+    M--xA: timeout
+    A->>G: estornar (compensacao)
+    A->>E: devolver estoque
+    A-->>C: 500 apos ~11 s, cobranca desfeita
+    Note over C,M: uma dependencia lenta ou fora do ar derruba o pedido inteiro

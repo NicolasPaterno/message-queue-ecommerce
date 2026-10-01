@@ -1,0 +1,25 @@
+flowchart LR
+    subgraph C["clientes"]
+        A[api]
+        W[worker]
+        M[web: Mapa de Mensagens]
+        O([operador])
+    end
+    subgraph B["RabbitMQ — vhost /shop"]
+        L1["listener AMQP TLS :5671<br/>(5672 desligada)"]
+        L2["Management HTTPS :15671<br/>(15672 desligada)"]
+        XO{{orders}}
+        XE{{expiry}}
+        XD{{dlx}}
+        QB[[stock · payment · notification]]
+        QD[[dlq]]
+    end
+    A -->|"amqps, usuario api"| L1
+    W -->|"amqps, usuario worker"| L1
+    M -->|"https, usuario monitor"| L2
+    O -->|"https, usuario admin"| L2
+    L1 -.->|"api: write ^orders$"| XO
+    L1 -.->|"worker: write ^(orders|expiry|dlx)$"| XE
+    L1 -.->|"worker: write"| XD
+    L1 -.->|"worker: read ^(stock|payment|notification)$"| QB
+    L2 -.->|"monitor: read ^dlq$ (tag monitoring)"| QD

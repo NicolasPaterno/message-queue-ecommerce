@@ -1,0 +1,27 @@
+sequenceDiagram
+    participant C as Cliente
+    participant A as api
+    participant B as RabbitMQ
+    participant W as worker
+    participant DB as PostgreSQL
+
+    Note over C,DB: Caso 12 — broker fora no checkout
+    C->>A: POST /carts/:id/checkout
+    A->>DB: BEGIN, CART → PLACED
+    A-xB: publish order.placed (sem conexao)
+    Note over A: limite de 5 s
+    A->>DB: ROLLBACK (pedido continua CART)
+    A-->>C: 503 {"error": "unavailable: ..."}
+    Note over B: broker volta
+    C->>A: POST /carts/:id/checkout (de novo)
+    A->>B: publish + confirm
+    A->>DB: COMMIT
+    A-->>C: 201 PLACED
+
+    Note over C,DB: Caso 9 — consumidor fora e reinicio do broker
+    W--xB: worker parado
+    A->>B: order.placed x3 (persistentes, fila duravel)
+    Note over B: fila stock acumula 3
+    B->>B: restart: mensagens persistentes sobrevivem
+    W->>B: worker volta, reconecta com backoff
+    B->>W: entrega as 3, ack apos cada commit

@@ -20,8 +20,14 @@ flowchart TB
     HS -.->|"publica reservation.created<br/>ou reservation.rejected"| EX
     HP -.->|"publica payment.approved<br/>ou payment.declined"| EX
     HS -.->|publica reservation.expired| XE{{exchange: expiry}}
-    XE --> QX[["fila: expiry.q<br/>x-message-ttl: 120000<br/>sem consumidor"]]
+    XE --> QX[["fila: expiry.q<br/>politica expiry-ttl: 120 s<br/>sem consumidor"]]
     QX -.->|"TTL expira, dead-letter<br/>routing key preservada"| EX
+
+    QS & QP & QN -.->|"falha: Nack<br/>politica retry-dlx"| XR{{exchange: retry}}
+    XR --> QR[["fila: retry.q<br/>politica retry-ttl: 10 s"]]
+    QR -.->|"TTL expira, volta ao orders<br/>(todas as filas ligadas a chave)"| EX
+    W -.->|"3a falha ou mensagem invalida<br/>publica com confirm"| XD{{exchange: dlx}}
+    XD --> QD[["fila: dlq<br/>inspecao manual"]]
 
     API --> PG[(PostgreSQL)]
     HS --> PG
@@ -29,5 +35,5 @@ flowchart TB
 
     classDef ex fill:#e8e8f5,stroke:#555
     classDef q fill:#f5f0e0,stroke:#555
-    class EX,XE ex
-    class QP,QS,QN,QX q
+    class EX,XE,XR,XD ex
+    class QP,QS,QN,QX,QR,QD q

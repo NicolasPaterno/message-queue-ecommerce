@@ -1,0 +1,28 @@
+sequenceDiagram
+    participant A as api
+    participant X as exchange orders
+    participant S as handler stock
+    participant DB as PostgreSQL
+    participant N as handler notification
+
+    Note over A,DB: Caso 3 — estoque insuficiente (quantity 11, available 10)
+    A->>X: order.placed
+    X->>S: order.placed
+    S->>DB: BEGIN, CAS PLACED → RESERVED, UPDATE available - 11 WHERE available >= 11
+    DB-->>S: 0 linhas: ROLLBACK de tudo
+    S->>DB: BEGIN, CAS PLACED → OUT_OF_STOCK
+    S->>X: publish reservation.rejected (confirm)
+    S->>DB: COMMIT
+    X->>N: reservation.rejected
+    Note over S,DB: payment nunca recebe mensagem
+
+    Note over A,DB: Caso 4 — ultima unidade, dois pedidos ao mesmo tempo
+    A->>X: order.placed (pedido 1)
+    A->>X: order.placed (pedido 2)
+    X->>S: pedido 1
+    S->>DB: UPDATE available - 1 WHERE available >= 1: 1 linha
+    S->>X: reservation.created
+    X->>S: pedido 2
+    S->>DB: UPDATE available - 1 WHERE available >= 1: 0 linhas
+    S->>DB: pedido 2 → OUT_OF_STOCK
+    Note over DB: CHECK (available >= 0) e a ultima barreira, nunca negativo
