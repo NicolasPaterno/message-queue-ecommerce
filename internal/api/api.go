@@ -17,10 +17,28 @@ import (
 	"message-queue-ecommerce/internal/store"
 )
 
-// The API contract (OpenAPI 3.1), shipped inside the binary and served as is.
+// The API contract (OpenAPI 3.1), shipped inside the binary; /docs renders it from /openapi.yaml.
 //
 //go:embed openapi.yaml
 var openapi []byte
+
+// docsHTML renders /openapi.yaml with Swagger UI loaded from a CDN (the browser needs internet; the api doesn't).
+// Same origin as the api, so "Try it out" calls the real routes.
+const docsHTML = `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>message-queue-ecommerce API</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.33.1/swagger-ui.css">
+</head>
+<body>
+<div id="ui"></div>
+<script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.33.1/swagger-ui-bundle.js"></script>
+<script>SwaggerUIBundle({ url: "/openapi.yaml", dom_id: "#ui" });</script>
+</body>
+</html>
+`
 
 var (
 	errBadRequest  = errors.New("bad request")
@@ -52,6 +70,10 @@ func Run(ctx context.Context, db *sql.DB, amqpURL string) error {
 	mux.HandleFunc("GET /openapi.yaml", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/yaml")
 		w.Write(openapi)
+	})
+	mux.HandleFunc("GET /docs", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(docsHTML))
 	})
 
 	srv := &http.Server{Addr: ":8080", Handler: mux}

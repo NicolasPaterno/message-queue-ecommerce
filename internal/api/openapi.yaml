@@ -166,16 +166,16 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/Internal" }
 
-  /openapi.yaml:
+  /docs:
     get:
       tags: [documentação]
-      summary: Esta especificação
-      operationId: openapi
+      summary: Documentação navegável (Swagger UI) desta especificação
+      operationId: docs
       responses:
         "200":
-          description: Especificação OpenAPI 3.1
+          description: Página HTML
           content:
-            application/yaml:
+            text/html:
               schema: { type: string }
 
 components:
