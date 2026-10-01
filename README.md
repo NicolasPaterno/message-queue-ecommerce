@@ -120,7 +120,7 @@ Cada bolinha no mapa é uma mensagem **contada** pelos contadores da Management 
 
 ### Casos de uso
 
-Os 11 casos de uso, com comandos e evidências, estão em [`docs/etapa4.md`](docs/etapa4.md).
+Os 17 casos de uso, com comandos e evidências, estão em [`docs/etapa4.md`](docs/etapa4.md).
 
 ### Variáveis de ambiente
 
