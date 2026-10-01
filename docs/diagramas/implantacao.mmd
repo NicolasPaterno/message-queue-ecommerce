@@ -4,7 +4,7 @@ flowchart TB
             API["api<br/>Go 1.27 · distroless<br/>:8080"]
             WK["worker x N<br/>Go 1.27 · distroless"]
             RMQ["rabbitmq:3.13-management<br/>AMQP TLS :5671 · HTTPS :15671"]
-            PG["postgres:16<br/>:5432 (interna)"]
+            PG["postgres:16<br/>:5432 (só 127.0.0.1)"]
         end
         WEB["web: Next.js 16 · React 19<br/>npm run dev :3000"]
     end
