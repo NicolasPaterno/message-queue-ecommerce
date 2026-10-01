@@ -100,6 +100,22 @@ docker compose down -v
 
 O `-v` também apaga os dados do banco.
 
+### 9. Mapa de Mensagens (interface web)
+
+Uma página que desenha a topologia como um mapa de linhas e anima as mensagens ao vivo. Requer Node.js ≥ 20.9 (≥ 23 para `npm test`) e o ambiente do passo 2 rodando.
+
+```sh
+cd web
+npm install
+npm run dev
+```
+
+Abra `http://localhost:3000`. Os botões *Novo pedido*, *Rajada ×5* e *Sem estoque* usam a API real; a lista *Pedidos* mostra o status de cada um até o final. Clique na fila `dlq` para ver as mensagens que estão nela (sem removê-las).
+
+Falha, parada do worker e escala continuam no terminal (passos 6 e 7) e aparecem no mapa. Para repor o estoque: `sql "UPDATE products SET available=10"` (funções do passo 4).
+
+Cada bolinha no mapa é uma mensagem **contada** pelos contadores da Management API do RabbitMQ (atualizados a cada 1 s), não uma mensagem identificada. A página é só leitura sobre o broker: as credenciais da Management API ficam no servidor do Next (`MQ_USER`/`MQ_PASS`, padrão `worker`).
+
 ### Casos de uso
 
 Os 11 casos de uso, com comandos e evidências, estão em [`docs/etapa4.md`](docs/etapa4.md).
@@ -119,7 +135,10 @@ Os 11 casos de uso, com comandos e evidências, estão em [`docs/etapa4.md`](doc
 | `8080` | API HTTP (`api`) |
 | `5672` | AMQP (RabbitMQ) |
 | `15672` | Management UI (RabbitMQ) |
+| `3000` | Mapa de Mensagens (`web/`, `npm run dev`) |
 
 ## Stack
 
 Go 1.27 · `rabbitmq/amqp091-go` · `jackc/pgx` (via `database/sql`) · `net/http` · RabbitMQ 3.13 · PostgreSQL 16 · Docker Compose
+
+Interface web (`web/`): Next.js 16 · React 19 · `motion` · Tailwind CSS v4
