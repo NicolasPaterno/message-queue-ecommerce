@@ -56,6 +56,8 @@ func openDB(ctx context.Context, url string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Bursts queue on the pool instead of opening more than Postgres' max_connections (100), shared by api + N workers.
+	db.SetMaxOpenConns(20)
 	d := time.Second
 	for {
 		err := db.PingContext(ctx)
