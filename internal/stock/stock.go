@@ -38,28 +38,33 @@ const (
 
 // reserve runs the order status CAS before touching stock: the api publishes order.placed inside its
 // still-open tx, so the CAS waits on that row lock and sees the committed status (or 0 rows on rollback).
+// Its own events are published the same way, before commit: a failed publish rolls back and the delivery is
+// retried from scratch, instead of committing the dedupe row and skipping the publish on redelivery.
 // Out of stock rolls back every item and moves the order to OUT_OF_STOCK in a fresh tx.
 func reserve(ctx context.Context, db *sql.DB, ch *amqp.Channel, env mq.Envelope) error {
-	won, err := transition(ctx, db, env, store.StatusPlaced, store.StatusReserved, reserveSQL)
-	if errors.Is(err, errStockShort) {
-		if won, err = transition(ctx, db, env, store.StatusPlaced, store.StatusOutOfStock, ""); err != nil || !won {
+	won, err := transition(ctx, db, env, store.StatusPlaced, store.StatusReserved, reserveSQL, func() error {
+		if err := publish(ctx, ch, mq.ExOrders, mq.KeyReservationCreated, env.OrderID); err != nil {
 			return err
 		}
-		log.Printf("stock: out_of_stock order_id=%s", env.OrderID)
-		return publish(ctx, ch, mq.ExOrders, mq.KeyReservationRejected, env.OrderID)
-	}
-	if err != nil || !won {
+		return publish(ctx, ch, mq.ExExpiry, mq.KeyReservationExpired, env.OrderID)
+	})
+	if errors.Is(err, errStockShort) {
+		won, err = transition(ctx, db, env, store.StatusPlaced, store.StatusOutOfStock, "", func() error {
+			return publish(ctx, ch, mq.ExOrders, mq.KeyReservationRejected, env.OrderID)
+		})
+		if err == nil && won {
+			log.Printf("stock: out_of_stock order_id=%s", env.OrderID)
+		}
 		return err
 	}
-	log.Printf("stock: reserved order_id=%s", env.OrderID)
-	if err := publish(ctx, ch, mq.ExOrders, mq.KeyReservationCreated, env.OrderID); err != nil {
-		return err
+	if err == nil && won {
+		log.Printf("stock: reserved order_id=%s", env.OrderID)
 	}
-	return publish(ctx, ch, mq.ExExpiry, mq.KeyReservationExpired, env.OrderID)
+	return err
 }
 
 func release(ctx context.Context, db *sql.DB, env mq.Envelope, to string) error {
-	won, err := transition(ctx, db, env, store.StatusReserved, to, releaseSQL)
+	won, err := transition(ctx, db, env, store.StatusReserved, to, releaseSQL, nil)
 	if won {
 		log.Printf("stock: released order_id=%s status=%s", env.OrderID, to)
 	}
@@ -67,31 +72,36 @@ func release(ctx context.Context, db *sql.DB, env mq.Envelope, to string) error 
 }
 
 // transition, in one tx: dedupes env.ID, moves the order from → to and, only if that CAS won,
-// runs itemSQL for every item. Items go in product id order so concurrent txs lock rows in the same order.
+// runs itemSQL for every item and then then (the publishes), so they commit or roll back together. Items go in product id order so concurrent txs lock rows in the same order.
 // Returns true only when this call made the transition.
-func transition(ctx context.Context, db *sql.DB, env mq.Envelope, from, to, itemSQL string) (bool, error) {
+func transition(ctx context.Context, db *sql.DB, env mq.Envelope, from, to, itemSQL string, then func() error) (bool, error) {
 	var first, won bool
 	err := store.WithTx(ctx, db, func(tx *sql.Tx) error {
 		var err error
 		if first, err = store.MarkProcessed(ctx, tx, env.ID); err != nil || !first {
 			return err
 		}
-		if won, err = store.CASStatus(ctx, tx, env.OrderID, from, to); err != nil || !won || itemSQL == "" {
+		if won, err = store.CASStatus(ctx, tx, env.OrderID, from, to); err != nil || !won {
 			return err
 		}
-		items, err := store.LoadItems(ctx, tx, env.OrderID)
-		if err != nil {
-			return err
-		}
-		slices.SortFunc(items, func(a, b store.Item) int { return strings.Compare(a.ProductID, b.ProductID) })
-		for _, it := range items {
-			res, err := tx.ExecContext(ctx, itemSQL, it.Quantity, it.ProductID)
+		if itemSQL != "" {
+			items, err := store.LoadItems(ctx, tx, env.OrderID)
 			if err != nil {
 				return err
 			}
-			if n, _ := res.RowsAffected(); n == 0 {
-				return errStockShort
+			slices.SortFunc(items, func(a, b store.Item) int { return strings.Compare(a.ProductID, b.ProductID) })
+			for _, it := range items {
+				res, err := tx.ExecContext(ctx, itemSQL, it.Quantity, it.ProductID)
+				if err != nil {
+					return err
+				}
+				if n, _ := res.RowsAffected(); n == 0 {
+					return errStockShort
+				}
 			}
+		}
+		if then != nil {
+			return then()
 		}
 		return nil
 	})

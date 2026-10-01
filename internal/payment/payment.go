@@ -18,6 +18,7 @@ const declineRate = 0.15
 
 // Handler charges a reserved order. The order is only moved to PAID here; a decline writes no status,
 // because stock owns RESERVED→DECLINED when it releases the reservation on payment.declined.
+// The result is published inside the tx, before commit, so a failed publish rolls back the dedupe row too.
 func Handler(db *sql.DB, failRate float64) mq.Handler {
 	return func(ctx context.Context, ch *amqp.Channel, env mq.Envelope) error {
 		if env.Type != mq.KeyReservationCreated {
@@ -30,19 +31,30 @@ func Handler(db *sql.DB, failRate float64) mq.Handler {
 		declined := rand.Float64() < declineRate
 		var dup, won bool
 		var amount int64
+		var txID string
 		err := store.WithTx(ctx, db, func(tx *sql.Tx) error {
 			first, err := store.MarkProcessed(ctx, tx, env.ID)
-			if err != nil || !first || declined {
+			if err != nil || !first {
 				dup = !first
 				return err
+			}
+			if declined {
+				return publish(ctx, ch, mq.KeyPaymentDeclined, env.OrderID, nil)
 			}
 			items, err := store.LoadItems(ctx, tx, env.OrderID)
 			if err != nil {
 				return err
 			}
 			amount = store.TotalCents(items)
-			won, err = store.CASStatus(ctx, tx, env.OrderID, store.StatusReserved, store.StatusPaid)
-			return err
+			if won, err = store.CASStatus(ctx, tx, env.OrderID, store.StatusReserved, store.StatusPaid); err != nil || !won {
+				return err
+			}
+			txID = "TX-" + mq.NewID()[:8]
+			data := struct {
+				TransactionID string `json:"transaction_id"`
+				AmountCents   int64  `json:"amount_cents"`
+			}{txID, amount}
+			return publish(ctx, ch, mq.KeyPaymentApproved, env.OrderID, data)
 		})
 		switch {
 		case err != nil:
@@ -50,19 +62,8 @@ func Handler(db *sql.DB, failRate float64) mq.Handler {
 		case dup:
 			log.Printf("payment: duplicate id=%s", env.ID)
 		case declined:
-			if err := publish(ctx, ch, mq.KeyPaymentDeclined, env.OrderID, nil); err != nil {
-				return err
-			}
 			log.Printf("payment: declined order_id=%s", env.OrderID)
 		case won:
-			txID := "TX-" + mq.NewID()[:8]
-			data := struct {
-				TransactionID string `json:"transaction_id"`
-				AmountCents   int64  `json:"amount_cents"`
-			}{txID, amount}
-			if err := publish(ctx, ch, mq.KeyPaymentApproved, env.OrderID, data); err != nil {
-				return err
-			}
 			log.Printf("payment: approved order_id=%s transaction_id=%s amount_cents=%d", env.OrderID, txID, amount)
 		default:
 			log.Printf("payment: refund simulated order_id=%s amount_cents=%d", env.OrderID, amount)
