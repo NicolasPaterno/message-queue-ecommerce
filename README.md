@@ -76,6 +76,8 @@ O `status` final é `PAID` (ou `DECLINED` em ~15% das vezes, recusa simulada do 
 
 ### 6. Falha, DLQ e expiração
 
+Pela página (passo 9): *Pagamento falha 1×* mostra retry e recuperação; *Pagamento sempre falha* mostra 3 tentativas → `dlq` → `EXPIRED`, só naquele pedido. Pelo terminal, o equivalente na API é `checkout -d '{"simulate":"payment_once"}'` (ou `payment_always`). Para fazer **todos** os pagamentos falharem:
+
 ```sh
 FAIL_RATE=1 docker compose up -d worker
 ```
@@ -114,7 +116,7 @@ npm run dev
 
 Abra `http://localhost:3000`. Os botões *Novo pedido*, *Rajada ×5* e *Sem estoque* usam a API real; a lista *Pedidos* mostra o status de cada um até o final; a seta ▸ abre a linha do tempo do pedido (cada entrega do worker: fila, tentativa, ack/retry/dlq e o motivo), com a contagem até o próximo TTL (`retry.q` 10 s, `expiry.q` 120 s). Clique na fila `dlq` para ver as mensagens que estão nela (sem removê-las).
 
-Falha, parada do worker e escala continuam no terminal (passos 6 e 7) e aparecem no mapa. Para repor o estoque, use os botões `+5` e `Repor 10` na seção Estoque da barra lateral.
+Os botões *Falhas* fazem o pagamento daquele pedido falhar uma vez ou sempre (passo 6), e a linha já abre com a linha do tempo. A parada do worker, a escala e o `FAIL_RATE` global continuam no terminal (passos 6 e 7) e aparecem no mapa. Para repor o estoque, use os botões `+5` e `Repor 10` na seção Estoque da barra lateral.
 
 Cada bolinha no mapa é uma mensagem **contada** pelos contadores da Management API do RabbitMQ (atualizados a cada 1 s), não uma mensagem identificada. A página é só leitura sobre o broker: as credenciais da Management API ficam no servidor do Next (`MQ_USER`/`MQ_PASS` em `web/.env.local`: usuário `monitor`, sem escrita e com `read` só na `dlq`); o `npm run dev` confia na CA via `NODE_EXTRA_CA_CERTS`.
 
