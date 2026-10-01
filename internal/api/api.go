@@ -41,6 +41,7 @@ func Run(ctx context.Context, db *sql.DB, amqpURL string) error {
 	mux.HandleFunc("POST /carts/{id}/checkout", handle(s.checkout))
 	mux.HandleFunc("GET /orders/{id}", handle(s.getOrder))
 	mux.HandleFunc("GET /products", handle(s.listProducts))
+	mux.HandleFunc("POST /products/{id}/stock", handle(s.restock))
 
 	srv := &http.Server{Addr: ":8080", Handler: mux}
 	errc := make(chan error, 1)
@@ -203,13 +204,14 @@ func (s *server) getOrder(r *http.Request) (int, any, error) {
 	return http.StatusOK, map[string]any{"id": id, "status": status, "items": items, "total_cents": store.TotalCents(items)}, nil
 }
 
+type product struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	PriceCents int64  `json:"price_cents"`
+	Available  int    `json:"available"`
+}
+
 func (s *server) listProducts(r *http.Request) (int, any, error) {
-	type product struct {
-		ID         string `json:"id"`
-		Name       string `json:"name"`
-		PriceCents int64  `json:"price_cents"`
-		Available  int    `json:"available"`
-	}
 	rows, err := s.db.QueryContext(r.Context(), "SELECT id, name, price_cents, available FROM products ORDER BY name")
 	if err != nil {
 		return 0, nil, err
@@ -224,6 +226,30 @@ func (s *server) listProducts(r *http.Request) (int, any, error) {
 		out = append(out, p)
 	}
 	return http.StatusOK, out, rows.Err()
+}
+
+// restock only adds: a concurrent reservation's decrement is never overwritten, which is why there is no "set available" route.
+func (s *server) restock(r *http.Request) (int, any, error) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		return 0, nil, err
+	}
+	var in struct {
+		Add int `json:"add"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Add < 1 || in.Add > 1000 {
+		return 0, nil, fmt.Errorf("%w: need add between 1 and 1000", errBadRequest)
+	}
+	var p product
+	err = s.db.QueryRowContext(r.Context(), "UPDATE products SET available = available + $1 WHERE id = $2 RETURNING id, name, price_cents, available", in.Add, id).
+		Scan(&p.ID, &p.Name, &p.PriceCents, &p.Available)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil, fmt.Errorf("%w: product %s", errNotFound, id)
+	}
+	if err != nil {
+		return 0, nil, err
+	}
+	return http.StatusOK, p, nil
 }
 
 // lockCart row-locks the order until the tx ends, so concurrent add-item/checkout on one cart serialize.

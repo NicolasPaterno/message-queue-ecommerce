@@ -11,6 +11,8 @@ async function call(method: string, path: string, body?: unknown) {
 
 export const getProducts = (): Promise<Product[]> => call("GET", "/products");
 
+export const restock = (id: string, add: number): Promise<Product> => call("POST", `/products/${id}/stock`, { add });
+
 export const getOrder = (id: string): Promise<{ status: OrderStatus }> => call("GET", `/orders/${id}`);
 
 // Cart → item → checkout. Resolves after the broker confirmed order.placed (201); errors read "503 broker unavailable".

@@ -114,7 +114,7 @@ npm run dev
 
 Abra `http://localhost:3000`. Os botões *Novo pedido*, *Rajada ×5* e *Sem estoque* usam a API real; a lista *Pedidos* mostra o status de cada um até o final. Clique na fila `dlq` para ver as mensagens que estão nela (sem removê-las).
 
-Falha, parada do worker e escala continuam no terminal (passos 6 e 7) e aparecem no mapa. Para repor o estoque: `sql "UPDATE products SET available=10"` (funções do passo 4).
+Falha, parada do worker e escala continuam no terminal (passos 6 e 7) e aparecem no mapa. Para repor o estoque, use os botões `+5` e `Repor 10` na seção Estoque da barra lateral.
 
 Cada bolinha no mapa é uma mensagem **contada** pelos contadores da Management API do RabbitMQ (atualizados a cada 1 s), não uma mensagem identificada. A página é só leitura sobre o broker: as credenciais da Management API ficam no servidor do Next (`MQ_USER`/`MQ_PASS` em `web/.env.local`: usuário `monitor`, sem escrita e com `read` só na `dlq`); o `npm run dev` confia na CA via `NODE_EXTRA_CA_CERTS`.
 

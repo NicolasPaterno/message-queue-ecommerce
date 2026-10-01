@@ -1,6 +1,7 @@
 "use client";
 
-import type { OrderStatus, Product, TrackedOrder } from "@/lib/shop";
+import { useState } from "react";
+import { restock, type OrderStatus, type Product, type TrackedOrder } from "@/lib/shop";
 
 const CHIP: Record<OrderStatus, string> = {
   CART: "border-ink text-ink",
@@ -11,6 +12,9 @@ const CHIP: Record<OrderStatus, string> = {
   OUT_OF_STOCK: "border-line-dlx bg-line-dlx text-white",
   EXPIRED: "border-line-expiry bg-line-expiry text-white",
 };
+
+const BTN =
+  "rounded-md border-2 border-ink bg-white transition-colors hover:bg-ink hover:text-paper focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:pointer-events-none disabled:opacity-40";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const ms = (n: number) => (n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFixed(1)} s`);
@@ -28,6 +32,12 @@ export default function Sidebar({
   announce: string;
   onOrder: (quantity: number, times?: number) => void;
 }) {
+  const [stockErr, setStockErr] = useState<{ id: string; msg: string }>();
+  const add = (id: string, n: number) =>
+    restock(id, n).catch((e: Error) => {
+      setStockErr({ id, msg: e.message });
+      setTimeout(() => setStockErr((cur) => (cur?.id === id ? undefined : cur)), 4000);
+    });
   const p = products[0];
   const off = !online || !p;
   const actions = [
@@ -52,16 +62,41 @@ export default function Sidebar({
             key={a.label}
             onClick={a.run}
             disabled={off}
-            className="rounded-md border-2 border-ink bg-white px-4 py-2.5 text-left transition-colors hover:bg-ink hover:text-paper focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:pointer-events-none disabled:opacity-40"
+            className={`${BTN} px-4 py-2.5 text-left`}
           >
             <span className="block font-semibold">{a.label}</span>
             <span className="block font-mono text-[11px] opacity-70">{a.sub}</span>
           </button>
         ))}
+      </section>
+
+      <section className="flex flex-col gap-2" aria-label="Estoque">
+        <h2 className="text-sm font-extrabold tracking-widest text-muted uppercase">Estoque</h2>
         {products.map((x) => (
-          <p key={x.id} className="mt-1 font-mono text-xs text-muted">
-            {x.name} · {brl.format(x.price_cents / 100)} · <span className="font-semibold text-ink">{x.available} un.</span>
-          </p>
+          <div key={x.id} className="font-mono text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-muted">
+                {x.name} · {brl.format(x.price_cents / 100)} · <span className="font-semibold text-ink">{x.available} un.</span>
+              </span>
+              {x.available === 0 && (
+                <span className="rounded border-2 border-line-dlx bg-line-dlx px-1.5 py-px text-[10px] font-semibold text-white">ESGOTADO</span>
+              )}
+              <span className="ml-auto flex gap-1">
+                <button onClick={() => add(x.id, 5)} disabled={!online} className={`${BTN} px-2 py-1 text-xs`}>
+                  +5
+                </button>
+                {/* ponytail: 10 - available reads a value up to 1 s stale; it can only over-add a little, never oversell. GREATEST server-side if exact counts matter. */}
+                <button
+                  onClick={() => add(x.id, 10 - x.available)}
+                  disabled={!online || x.available >= 10}
+                  className={`${BTN} px-2 py-1 text-xs ${x.available === 0 ? "bg-ink! text-paper!" : ""}`}
+                >
+                  Repor 10
+                </button>
+              </span>
+            </div>
+            {stockErr?.id === x.id && <p className="mt-1 text-line-dlx">{stockErr.msg}</p>}
+          </div>
         ))}
       </section>
 
