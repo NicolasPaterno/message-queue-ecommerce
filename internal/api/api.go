@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,11 @@ import (
 	"message-queue-ecommerce/internal/mq"
 	"message-queue-ecommerce/internal/store"
 )
+
+// The API contract (OpenAPI 3.1), shipped inside the binary and served as is.
+//
+//go:embed openapi.yaml
+var openapi []byte
 
 var (
 	errBadRequest  = errors.New("bad request")
@@ -43,6 +49,10 @@ func Run(ctx context.Context, db *sql.DB, amqpURL string) error {
 	mux.HandleFunc("GET /orders/{id}", handle(s.getOrder))
 	mux.HandleFunc("GET /products", handle(s.listProducts))
 	mux.HandleFunc("POST /products/{id}/stock", handle(s.restock))
+	mux.HandleFunc("GET /openapi.yaml", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/yaml")
+		w.Write(openapi)
+	})
 
 	srv := &http.Server{Addr: ":8080", Handler: mux}
 	errc := make(chan error, 1)

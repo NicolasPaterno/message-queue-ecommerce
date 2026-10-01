@@ -1,0 +1,279 @@
+openapi: 3.1.0
+info:
+  title: message-queue-ecommerce API
+  version: 1.0.0
+  description: |
+    Loja com carrinho e checkout. O checkout só grava o pedido e publica `order.placed` no RabbitMQ;
+    reserva de estoque, pagamento e notificação acontecem de forma assíncrona no `worker`.
+    Acompanhe o resultado por `GET /orders/{id}`.
+
+    Todas as respostas são JSON. Erros vêm como `{"error": "..."}`. Valores em centavos (`*_cents`).
+servers:
+  - url: http://localhost:8080
+security: [] # sem autenticação: API de demonstração local
+tags:
+  - name: carrinho
+    description: Montar o carrinho e finalizar a compra
+  - name: pedidos
+    description: Acompanhar o pedido, que é processado de forma assíncrona
+  - name: produtos
+    description: Catálogo e estoque
+  - name: documentação
+    description: Esta especificação
+
+paths:
+  /carts:
+    post:
+      tags: [carrinho]
+      summary: Cria um carrinho
+      description: Um carrinho é um pedido em status `CART`.
+      operationId: createCart
+      responses:
+        "201":
+          description: Carrinho criado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderRef" }
+              example: { id: 3f0e6a8e-1c2b-4c7d-9a51-2b6f0d8c4e11, status: CART }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /carts/{id}/items:
+    post:
+      tags: [carrinho]
+      summary: Adiciona (ou substitui) um item no carrinho
+      description: O preço é congelado no momento em que o item é adicionado. Repetir o produto substitui a quantidade.
+      operationId: addItem
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product_id, quantity]
+              properties:
+                product_id: { type: string, format: uuid }
+                quantity: { type: integer, minimum: 1 }
+            example: { product_id: 5b8909f6-3539-4faa-bb3f-b20fa763a47c, quantity: 1 }
+      responses:
+        "201":
+          description: Item gravado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Item" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /carts/{id}/checkout:
+    post:
+      tags: [carrinho]
+      summary: Finaliza o carrinho
+      description: |
+        Move o pedido de `CART` para `PLACED` e publica `order.placed` dentro da mesma transação.
+        Só responde `201` depois do *publisher confirm* do RabbitMQ; sem confirmação em 5 s, a transação é
+        desfeita, o pedido continua `CART` e a resposta é `503` (pode repetir). O estoque **não** é verificado
+        aqui: a reserva é feita depois pelo `worker` (o resultado aparece em `GET /orders/{id}`).
+      operationId: checkout
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        required: false
+        description: Opcional, só para demonstração. Faz o pagamento deste pedido falhar uma vez ou sempre.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                simulate: { type: string, enum: [payment_once, payment_always] }
+            example: { simulate: payment_once }
+      responses:
+        "201":
+          description: Pedido aceito e evento confirmado pelo broker
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderRef" }
+              example: { id: 3f0e6a8e-1c2b-4c7d-9a51-2b6f0d8c4e11, status: PLACED }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503":
+          description: O broker não confirmou a publicação; o pedido continua `CART`
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "broker unavailable: context deadline exceeded" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /orders/{id}:
+    get:
+      tags: [pedidos]
+      summary: Consulta um pedido e sua linha do tempo
+      operationId: getOrder
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200":
+          description: Pedido
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /products:
+    get:
+      tags: [produtos]
+      summary: Lista os produtos com o estoque disponível
+      operationId: listProducts
+      responses:
+        "200":
+          description: Produtos, ordenados por nome
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Product" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /products/{id}/stock:
+    post:
+      tags: [produtos]
+      summary: Repõe estoque
+      description: Só soma unidades (nunca define o valor), para não sobrescrever uma reserva concorrente.
+      operationId: restock
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [add]
+              properties:
+                add: { type: integer, minimum: 1, maximum: 1000 }
+            example: { add: 5 }
+      responses:
+        "200":
+          description: Produto com o estoque atualizado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /openapi.yaml:
+    get:
+      tags: [documentação]
+      summary: Esta especificação
+      operationId: openapi
+      responses:
+        "200":
+          description: Especificação OpenAPI 3.1
+          content:
+            application/yaml:
+              schema: { type: string }
+
+components:
+  parameters:
+    OrderId:
+      name: id
+      in: path
+      required: true
+      description: Id do carrinho/pedido (UUID; um id que não é UUID responde `404`)
+      schema: { type: string, format: uuid }
+
+  responses:
+    BadRequest:
+      description: Corpo inválido
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: "bad request: need product_id and quantity > 0" }
+    NotFound:
+      description: Carrinho, pedido ou produto inexistente (ou id que não é UUID)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: "not found: order 00000000-0000-0000-0000-000000000000" }
+    Conflict:
+      description: O pedido não está mais em `CART`, ou o carrinho está vazio
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: "conflict: order is PAID, not CART" }
+    Internal:
+      description: Erro inesperado (detalhe só no log da `api`)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: internal error }
+
+  schemas:
+    Status:
+      type: string
+      description: |
+        `CART` → `PLACED` → `RESERVED` → `PAID`, ou um dos finais `OUT_OF_STOCK`, `DECLINED`, `EXPIRED`.
+      enum: [CART, PLACED, RESERVED, PAID, OUT_OF_STOCK, DECLINED, EXPIRED]
+    OrderRef:
+      type: object
+      required: [id, status]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/Status" }
+    Item:
+      type: object
+      required: [product_id, quantity, price_cents]
+      properties:
+        product_id: { type: string, format: uuid }
+        quantity: { type: integer, minimum: 1 }
+        price_cents: { type: integer, format: int64, description: Preço unitário congelado ao adicionar }
+    Event:
+      type: object
+      description: Uma entrega de mensagem ao `worker` e o que ele decidiu
+      required: [at, queue, type, attempt, outcome]
+      properties:
+        at: { type: string, format: date-time }
+        queue: { type: string, enum: [stock, payment, notification] }
+        type: { type: string, example: reservation.created }
+        attempt: { type: integer, minimum: 1, maximum: 3 }
+        outcome: { type: string, enum: [ack, retry, dlq] }
+        error: { type: string, description: Ausente quando `outcome` é `ack` }
+    Order:
+      type: object
+      required: [id, status, items, total_cents, events]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/Status" }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Item" }
+        total_cents: { type: integer, format: int64 }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/Event" }
+      example:
+        id: d93c8d8e-e941-4958-bd36-364fa06fbebc
+        status: PAID
+        items: [{ product_id: 5b8909f6-3539-4faa-bb3f-b20fa763a47c, quantity: 1, price_cents: 24990 }]
+        total_cents: 24990
+        events:
+          - { at: "2026-10-01T18:19:43.100Z", queue: stock, type: order.placed, attempt: 1, outcome: ack }
+          - { at: "2026-10-01T18:19:43.140Z", queue: payment, type: reservation.created, attempt: 1, outcome: ack }
+    Product:
+      type: object
+      required: [id, name, price_cents, available]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        price_cents: { type: integer, format: int64 }
+        available: { type: integer, minimum: 0 }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
