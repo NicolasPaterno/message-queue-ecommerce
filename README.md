@@ -27,7 +27,6 @@ Detalhes completos, diagramas e justificativa de decisões em [`docs/etapa2.md`]
 | [`docs/etapa4.md`](docs/etapa4.md) | Execução dos casos de uso, com comandos e evidências |
 | [`docs/etapa5.md`](docs/etapa5.md) | Stack, estrutura do código, formato das mensagens, boas práticas, limitações |
 | [`docs/diagramas/`](docs/diagramas) | Diagramas (`.mmd` e `.png`) |
-| [`internal/api/openapi.yaml`](internal/api/openapi.yaml) | Contrato da API HTTP (OpenAPI 3.1), servido em `GET /openapi.yaml` |
 
 ## Como executar
 
@@ -121,28 +120,9 @@ Os botões *Falhas* fazem o pagamento daquele pedido falhar uma vez ou sempre (p
 
 Cada bolinha no mapa é uma mensagem **contada** pelos contadores da Management API do RabbitMQ (atualizados a cada 1 s), não uma mensagem identificada. A página é só leitura sobre o broker: as credenciais da Management API ficam no servidor do Next (`MQ_USER`/`MQ_PASS` em `web/.env.local`: usuário `monitor`, sem escrita e com `read` só na `dlq`); o `npm run dev` confia na CA via `NODE_EXTRA_CA_CERTS`.
 
-### API HTTP (OpenAPI)
+### Documentação da API
 
-O contrato da API está em [`internal/api/openapi.yaml`](internal/api/openapi.yaml) (OpenAPI 3.1): rotas, corpos,
-respostas de sucesso e de erro, com exemplos. O arquivo é embutido no binário e servido pela própria `api`:
-
-```sh
-curl -s localhost:8080/openapi.yaml
-```
-
-| Método | Rota | O que faz |
-|---|---|---|
-| `POST` | `/carts` | Cria um carrinho (pedido em `CART`) |
-| `POST` | `/carts/{id}/items` | Adiciona ou substitui um item (`product_id`, `quantity`); o preço é congelado |
-| `POST` | `/carts/{id}/checkout` | `CART → PLACED` e publica `order.placed`; `201` só após o *confirm* do broker, `503` se não vier. Corpo opcional `{"simulate":"payment_once"\|"payment_always"}` |
-| `GET` | `/orders/{id}` | Status, itens, total e a linha do tempo de entregas ao `worker` |
-| `GET` | `/products` | Produtos e estoque disponível |
-| `POST` | `/products/{id}/stock` | Repõe estoque (`{"add": 1..1000}`) |
-| `GET` | `/openapi.yaml` | Esta especificação |
-
-Para ver a documentação navegável, abra o arquivo no [Swagger Editor](https://editor.swagger.io) (*File → Import
-file*) ou gere uma página HTML com `npx @redocly/cli build-docs internal/api/openapi.yaml -o api.html && open api.html`. Para validar depois de mudar uma rota:
-`npx @redocly/cli lint internal/api/openapi.yaml`.
+http://localhost:8080/docs
 
 ### Casos de uso
 
@@ -161,7 +141,7 @@ Os 17 casos de uso, com comandos e evidências, estão em [`docs/etapa4.md`](doc
 
 | Porta | Serviço |
 |---|---|
-| `8080` | API HTTP (`api`); contrato em `/openapi.yaml` |
+| `8080` | API HTTP (`api`) |
 | `5671` | AMQP sobre TLS (RabbitMQ, só `127.0.0.1`) |
 | `15671` | Management UI HTTPS (RabbitMQ, só `127.0.0.1`) |
 | `3000` | Mapa de Mensagens (`web/`, `npm run dev`) |
