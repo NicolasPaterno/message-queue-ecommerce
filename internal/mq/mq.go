@@ -29,11 +29,12 @@ const (
 	KeyPaymentDeclined     = "payment.declined"
 	KeyReservationExpired  = "reservation.expired"
 
-	prefetch    = 10     // unacked deliveries per consumer
-	maxAttempts = 3      // deliveries per queue before dlq
-	retryTTL    = 10000  // ms a rejected message waits in retry.q before redelivery
-	expiryTTL   = 120000 // ms a reservation lives in expiry.q before it is released
+	prefetch    = 10 // unacked deliveries per consumer
+	maxAttempts = 3  // deliveries per queue before dlq
 )
+
+// Exchanges, queues, bindings and the retry/expiry/dead-letter policies (TTL 10 s and 120 s) are not declared here:
+// the broker loads them from deploy/definitions.json at boot, so the app users need no configure permission.
 
 // Envelope is the body of every message. Routing key == Type; ID is the idempotency key and AMQP MessageId.
 type Envelope struct {

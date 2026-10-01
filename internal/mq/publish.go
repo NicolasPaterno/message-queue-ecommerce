@@ -50,51 +50,6 @@ func OpenChannel(conn *amqp.Connection) (*amqp.Channel, error) {
 	return ch, nil
 }
 
-var queues = []struct {
-	name string
-	args amqp.Table
-}{
-	{QStock, amqp.Table{"x-dead-letter-exchange": ExRetry}},
-	{QPayment, amqp.Table{"x-dead-letter-exchange": ExRetry}},
-	{QNotification, amqp.Table{"x-dead-letter-exchange": ExRetry}},
-	{QRetry, amqp.Table{"x-message-ttl": int32(retryTTL), "x-dead-letter-exchange": ExOrders}},
-	{QExpiry, amqp.Table{"x-message-ttl": int32(expiryTTL), "x-dead-letter-exchange": ExOrders}},
-	{QDLQ, nil},
-}
-
-var bindings = []struct{ queue, key, exchange string }{
-	{QStock, KeyOrderPlaced, ExOrders},
-	{QStock, KeyPaymentDeclined, ExOrders},
-	{QStock, KeyReservationExpired, ExOrders},
-	{QPayment, KeyReservationCreated, ExOrders},
-	{QNotification, "#", ExOrders},
-	{QRetry, "#", ExRetry},
-	{QExpiry, "#", ExExpiry},
-	{QDLQ, "#", ExDLX},
-}
-
-// DeclareTopology idempotently declares the 4 durable topic exchanges, 6 durable queues, their bindings
-// and the dead-letter/TTL args that implement retry, expiry and dlq.
-// Args must never change between runs: redeclaring a queue with different args fails with PRECONDITION_FAILED.
-func DeclareTopology(ch *amqp.Channel) error {
-	for _, ex := range []string{ExOrders, ExRetry, ExDLX, ExExpiry} {
-		if err := ch.ExchangeDeclare(ex, "topic", true, false, false, false, nil); err != nil {
-			return err
-		}
-	}
-	for _, q := range queues {
-		if _, err := ch.QueueDeclare(q.name, true, false, false, false, q.args); err != nil {
-			return err
-		}
-	}
-	for _, b := range bindings {
-		if err := ch.QueueBind(b.queue, b.key, b.exchange, false, nil); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // Publish sends env persistent with key env.Type and blocks until the broker confirms; nack or timeout → error.
 func Publish(ctx context.Context, ch *amqp.Channel, exchange string, env Envelope) error {
 	body, err := json.Marshal(env)
@@ -139,10 +94,6 @@ func NewPublisher(ctx context.Context, url string) (*Publisher, error) {
 	}
 	ch, err := OpenChannel(conn)
 	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-	if err := DeclareTopology(ch); err != nil {
 		conn.Close()
 		return nil, err
 	}

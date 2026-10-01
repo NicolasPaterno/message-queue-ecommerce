@@ -1,0 +1,241 @@
+{
+  "users": [
+    {
+      "name": "api",
+      "password": "__API_PASS__",
+      "tags": ""
+    },
+    {
+      "name": "worker",
+      "password": "__WORKER_PASS__",
+      "tags": ""
+    },
+    {
+      "name": "monitor",
+      "password": "__MONITOR_PASS__",
+      "tags": "monitoring"
+    },
+    {
+      "name": "admin",
+      "password": "__ADMIN_PASS__",
+      "tags": "administrator"
+    }
+  ],
+  "vhosts": [
+    {
+      "name": "/shop"
+    }
+  ],
+  "permissions": [
+    {
+      "user": "api",
+      "vhost": "/shop",
+      "configure": "^$",
+      "write": "^orders$",
+      "read": "^$"
+    },
+    {
+      "user": "worker",
+      "vhost": "/shop",
+      "configure": "^$",
+      "write": "^(orders|expiry|dlx)$",
+      "read": "^(stock|payment|notification)$"
+    },
+    {
+      "user": "monitor",
+      "vhost": "/shop",
+      "configure": "^$",
+      "write": "^$",
+      "read": "^dlq$"
+    },
+    {
+      "user": "admin",
+      "vhost": "/shop",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
+  "policies": [
+    {
+      "vhost": "/shop",
+      "name": "retry-dlx",
+      "pattern": "^(stock|payment|notification)$",
+      "apply-to": "queues",
+      "priority": 0,
+      "definition": {
+        "dead-letter-exchange": "retry"
+      }
+    },
+    {
+      "vhost": "/shop",
+      "name": "retry-ttl",
+      "pattern": "^retry\\.q$",
+      "apply-to": "queues",
+      "priority": 0,
+      "definition": {
+        "message-ttl": 10000,
+        "dead-letter-exchange": "orders"
+      }
+    },
+    {
+      "vhost": "/shop",
+      "name": "expiry-ttl",
+      "pattern": "^expiry\\.q$",
+      "apply-to": "queues",
+      "priority": 0,
+      "definition": {
+        "message-ttl": 120000,
+        "dead-letter-exchange": "orders"
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "orders",
+      "vhost": "/shop",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "retry",
+      "vhost": "/shop",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "dlx",
+      "vhost": "/shop",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "expiry",
+      "vhost": "/shop",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "queues": [
+    {
+      "name": "stock",
+      "vhost": "/shop",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "payment",
+      "vhost": "/shop",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "notification",
+      "vhost": "/shop",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "retry.q",
+      "vhost": "/shop",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "expiry.q",
+      "vhost": "/shop",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "dlq",
+      "vhost": "/shop",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    {
+      "source": "orders",
+      "vhost": "/shop",
+      "destination": "stock",
+      "destination_type": "queue",
+      "routing_key": "order.placed",
+      "arguments": {}
+    },
+    {
+      "source": "orders",
+      "vhost": "/shop",
+      "destination": "stock",
+      "destination_type": "queue",
+      "routing_key": "payment.declined",
+      "arguments": {}
+    },
+    {
+      "source": "orders",
+      "vhost": "/shop",
+      "destination": "stock",
+      "destination_type": "queue",
+      "routing_key": "reservation.expired",
+      "arguments": {}
+    },
+    {
+      "source": "orders",
+      "vhost": "/shop",
+      "destination": "payment",
+      "destination_type": "queue",
+      "routing_key": "reservation.created",
+      "arguments": {}
+    },
+    {
+      "source": "orders",
+      "vhost": "/shop",
+      "destination": "notification",
+      "destination_type": "queue",
+      "routing_key": "#",
+      "arguments": {}
+    },
+    {
+      "source": "retry",
+      "vhost": "/shop",
+      "destination": "retry.q",
+      "destination_type": "queue",
+      "routing_key": "#",
+      "arguments": {}
+    },
+    {
+      "source": "expiry",
+      "vhost": "/shop",
+      "destination": "expiry.q",
+      "destination_type": "queue",
+      "routing_key": "#",
+      "arguments": {}
+    },
+    {
+      "source": "dlx",
+      "vhost": "/shop",
+      "destination": "dlq",
+      "destination_type": "queue",
+      "routing_key": "#",
+      "arguments": {}
+    }
+  ]
+}

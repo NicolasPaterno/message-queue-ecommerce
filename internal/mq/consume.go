@@ -16,7 +16,7 @@ import (
 // RunConsumers runs one consume goroutine per queue on a shared connection, reconnects with backoff on loss,
 // and on ctx done waits for in-flight messages before returning nil.
 // A failed pass waits before retrying: Connect only backs off when the dial fails, so a reachable broker that
-// refuses the declare or a consumer (e.g. ACCESS_REFUSED) would otherwise spin in a tight loop.
+// refuses a consumer (e.g. ACCESS_REFUSED, or a queue missing from definitions.json) would otherwise spin in a tight loop.
 func RunConsumers(ctx context.Context, url string, handlers map[string]Handler) error {
 	backoff := time.Second
 	for {
@@ -27,15 +27,6 @@ func RunConsumers(ctx context.Context, url string, handlers map[string]Handler) 
 			}
 			return err
 		}
-		if err := declare(conn); err != nil {
-			conn.Close()
-			log.Printf("amqp: declare topology: %v", err)
-			if !sleep(ctx, &backoff) {
-				return nil
-			}
-			continue
-		}
-
 		cctx, cancel := context.WithCancel(ctx)
 		closed := conn.NotifyClose(make(chan *amqp.Error, 1))
 		var wg sync.WaitGroup
@@ -63,15 +54,6 @@ func RunConsumers(ctx context.Context, url string, handlers map[string]Handler) 
 			return nil
 		}
 	}
-}
-
-func declare(conn *amqp.Connection) error {
-	ch, err := OpenChannel(conn)
-	if err != nil {
-		return err
-	}
-	defer ch.Close()
-	return DeclareTopology(ch)
 }
 
 // consume uses manual ack. Bad JSON or non-UUID ids, ErrPermanent or the last allowed attempt → dlq + ack;

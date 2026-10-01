@@ -2,10 +2,13 @@ services:
   rabbitmq:
     image: rabbitmq:3.13-management
     hostname: rabbitmq
-    ports: ["5672:5672", "15672:15672"]
-    volumes: ["./definitions.json:/etc/rabbitmq/definitions.json:ro"]
+    ports: ["127.0.0.1:5671:5671", "127.0.0.1:15671:15671"]
+    volumes:
+      - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./certs:/etc/rabbitmq/certs:ro
     environment:
-      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: '-rabbit load_definitions "/etc/rabbitmq/definitions.json" -rabbit collect_statistics_interval 1000 -rabbitmq_management_agent sample_retention_policies [{global,[{605,1}]},{basic,[{605,1}]},{detailed,[{605,1}]}]'
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: '-rabbitmq_management_agent sample_retention_policies [{global,[{605,1}]},{basic,[{605,1}]},{detailed,[{605,1}]}]'
 
   postgres:
     image: postgres:16
@@ -19,14 +22,18 @@ services:
     build: ..
     command: ["/app", "api"]
     ports: ["8080:8080"]
+    volumes: ["./certs/ca.pem:/certs/ca.pem:ro"]
     environment:
-      AMQP_URL: amqp://api:api@rabbitmq:5672/%2Fshop
+      AMQP_URL: amqps://api:${API_PASS}@rabbitmq:5671/%2Fshop
+      SSL_CERT_FILE: /certs/ca.pem
       DB_URL: postgres://shop:shop@postgres:5432/shop?sslmode=disable
 
   worker:
     build: ..
     command: ["/app", "worker"]
+    volumes: ["./certs/ca.pem:/certs/ca.pem:ro"]
     environment:
-      AMQP_URL: amqp://worker:worker@rabbitmq:5672/%2Fshop
+      AMQP_URL: amqps://worker:${WORKER_PASS}@rabbitmq:5671/%2Fshop
+      SSL_CERT_FILE: /certs/ca.pem
       DB_URL: postgres://shop:shop@postgres:5432/shop?sslmode=disable
       FAIL_RATE: ${FAIL_RATE:-0}
