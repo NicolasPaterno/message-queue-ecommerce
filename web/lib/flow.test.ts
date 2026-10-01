@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { diff, parse, type Hop, type Snapshot, type Totals } from "./flow.ts";
+import { diff, paint, parse, type Hop, type Snapshot, type Src, type Totals } from "./flow.ts";
 
 type Stats = { publish?: number; deliver_get?: number; ack?: number };
 type Q = { name: string; messages?: number; messages_ready?: number; messages_unacknowledged?: number; message_stats?: Stats };
 const snap = (queues: Q[], publishIn = 0, checkouts = 0) => parse(queues, { message_stats: { publish_in: publishIn } }, checkouts, 0);
-const edges = (hops: Hop[]) => Object.fromEntries(hops.map((h) => [h.edge, h.n]));
+const edges = (hops: Hop[]) => hops.reduce<Record<string, number>>((m, h) => ({ ...m, [h.edge]: (m[h.edge] ?? 0) + h.n }), {});
+const colored = (hops: Hop[]) => hops.reduce<Record<string, number>>((m, h) => ({ ...m, [`${h.edge}|${h.src}`]: (m[`${h.edge}|${h.src}`] ?? 0) + h.n }), {});
 
 // Feeds snapshots in order like useLive does; returns the hops of each step after the first.
 function run(...snaps: Snapshot[]) {
@@ -114,4 +115,31 @@ test("unknown queues ignored, missing ones zero", () => {
   const s = snap([{ name: "other", messages: 5 }]);
   assert.equal(s.queues.stock.messages, 0);
   assert.equal(Object.keys(s.queues).length, 6);
+});
+
+test("each queue's failures keep its color on the way to retry", () => {
+  const q = (name: string, d: number): Q => ({ name, message_stats: { publish: 1, deliver_get: d, ack: 0 } });
+  const a = snap([q("payment", 0), q("notification", 0)]);
+  const b = snap([q("payment", 1), q("notification", 1)]);
+  const r = diff({}, undefined, a);
+  const hops = diff(r.high, a, b).hops.filter((h) => h.edge === "bus-retry");
+  assert.deepEqual(colored(hops), { "bus-retry|payment": 1, "bus-retry|notification": 1 });
+});
+
+test("worker output split: reservation.created is stock's, the rest payment's", () => {
+  const a = snap([], 0, 0);
+  const b = snap([{ name: "payment", message_stats: { publish: 2 } }], 5, 1); // 4 worker publishes, 2 of them stock's
+  const hops = diff(diff({}, undefined, a).high, a, b).hops.filter((h) => h.edge === "worker-orders");
+  assert.deepEqual(colored(hops), { "worker-orders|stock": 2, "worker-orders|payment": 2 });
+});
+
+test("paint: retry.q exits take the colors of earlier nacks, oldest first", () => {
+  const nack = (src: Src, n = 1): Hop => ({ edge: "bus-retry", src, n });
+  const exit = (n: number): Hop => ({ edge: "retryq-orders", src: "none", n });
+  let fifo: Src[] = [];
+  ({ fifo } = paint([nack("payment"), nack("notification")], fifo));
+  const r = paint([exit(1), nack("stock")], fifo); // the exit left before this poll's nack entered
+  assert.deepEqual(r.hops.filter((h) => h.edge === "retryq-orders").map((h) => h.src), ["payment"]);
+  assert.deepEqual(r.fifo, ["notification", "stock"]);
+  assert.deepEqual(paint([exit(3)], r.fifo).hops.map((h) => h.src), ["notification", "stock", "none"]);
 });

@@ -10,6 +10,13 @@
   --color-line-dlx: #c8322b;
   --color-line-expiry: #2f5da8;
   --color-line-http: #6b665c;
+  /* map: a token's color is its source queue; lines stay neutral */
+  --color-src-api: #1b1b1b;
+  --color-src-stock: #2f5da8;
+  --color-src-payment: #0b7a55;
+  --color-src-notification: #e0a100;
+  --color-src-none: #8a8478;
+  --color-rail: #c9c2b2;
 }
 
 @theme inline {

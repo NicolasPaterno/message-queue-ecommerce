@@ -2,26 +2,37 @@
 
 import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion, useTransform } from "motion/react";
 import { useCallback, useEffect, useState } from "react";
-import type { EdgeId, QueueName, Snapshot } from "@/lib/flow";
+import type { EdgeId, QueueName, Snapshot, Src } from "@/lib/flow";
 import type { LiveHop } from "@/lib/live";
 import type { Product } from "@/lib/shop";
-import { API, CLIENT, EDGES, EXCHANGES, LANES, POSTGRES, STATIONS, WORKER, along, type Line } from "@/lib/topology";
+import { API, CLIENT, DASH, EDGES, EXCHANGES, LANES, POSTGRES, STATIONS, WORKER, along } from "@/lib/topology";
 
-// Full class names so Tailwind sees them.
-const STROKE: Record<Line, string> = {
-  orders: "stroke-line-orders",
-  retry: "stroke-line-retry",
-  dlx: "stroke-line-dlx",
-  expiry: "stroke-line-expiry",
-  http: "stroke-line-http",
+// Full class names so Tailwind sees them. Color = the message's source queue.
+const FILL: Record<Src, string> = {
+  api: "fill-src-api",
+  stock: "fill-src-stock",
+  payment: "fill-src-payment",
+  notification: "fill-src-notification",
+  none: "fill-src-none",
 };
-const FILL: Record<Line, string> = {
-  orders: "fill-line-orders",
-  retry: "fill-line-retry",
-  dlx: "fill-line-dlx",
-  expiry: "fill-line-expiry",
-  http: "fill-line-http",
+const TAB: Record<QueueName, string> = {
+  stock: FILL.stock,
+  payment: FILL.payment,
+  notification: FILL.notification,
+  "retry.q": "fill-rail",
+  "expiry.q": "fill-rail",
+  dlq: "fill-line-dlx",
 };
+const SRC_NAME: [Src, string][] = [
+  ["stock", "stock"],
+  ["payment", "payment"],
+  ["notification", "notification"],
+  ["api", "ainda sem fila"],
+  ["none", "desconhecida"],
+];
+
+// One knob for every duration on the map; 1 = the original speed.
+const PACE = 2.5;
 
 // Hops of one poll are drawn as a wave in causal order: out of a TTL queue → into a queue → to the worker → out of the worker.
 const STAGE: Record<EdgeId, number> = {
@@ -30,7 +41,7 @@ const STAGE: Record<EdgeId, number> = {
   "stock-worker": 2, "payment-worker": 2, "notification-worker": 2,
   "worker-orders": 3, "worker-expiry": 3, "bus-retry": 3, "bus-dlq": 3,
 };
-const MAX_TOKENS = 80;
+const MAX_TOKENS = 160;
 const AT = Object.fromEntries(Object.entries(EDGES).map(([id, e]) => [id, along(e.d)])) as Record<EdgeId, ReturnType<typeof along>>;
 const WORKER_EDGES: Partial<Record<EdgeId, keyof typeof LANES>> = {
   "stock-worker": "stock",
@@ -38,13 +49,13 @@ const WORKER_EDGES: Partial<Record<EdgeId, keyof typeof LANES>> = {
   "notification-worker": "notification",
 };
 
-interface Tok { id: number; edge: EdgeId; delay: number }
+interface Tok { id: number; edge: EdgeId; src: Src; delay: number }
 
 function schedule(hops: LiveHop[]): Tok[] {
   const perStage = [0, 0, 0, 0];
   return hops.map((h) => {
     const s = STAGE[h.edge];
-    return { ...h, delay: s * 0.35 + Math.min(perStage[s]++, 8) * 0.05 };
+    return { ...h, delay: PACE * (s * 0.35 + Math.min(perStage[s]++, 8) * 0.05) };
   });
 }
 
@@ -66,7 +77,7 @@ export default function FlowMap({
   const [lastId, setLastId] = useState(() => hops.at(-1)?.id ?? -1);
   const [tokens, setTokens] = useState<Tok[]>([]);
   const [flash, setFlash] = useState<Partial<Record<keyof typeof LANES, number>>>({});
-  const [pulses, setPulses] = useState<number[]>([]);
+  const [pulses, setPulses] = useState<{ id: number; src: Src }[]>([]);
 
   // New poll → queue its tokens (adjusting state during render, no effect needed).
   // A hidden tab pauses animations; skip its tokens instead of replaying a backlog on return.
@@ -82,7 +93,7 @@ export default function FlowMap({
     const lane = WORKER_EDGES[tok.edge];
     if (lane) {
       setFlash((f) => ({ ...f, [lane]: tok.id }));
-      setPulses((p) => [...p, tok.id]);
+      setPulses((p) => [...p, { id: tok.id, src: tok.src }]);
     }
   }, []);
 
@@ -104,19 +115,20 @@ export default function FlowMap({
         animate={{ opacity: 1 }}
         transition={{ duration: 0.4 }}
       >
-        {/* lines */}
+        {/* lines: neutral rails, the exchange told apart by its stroke pattern */}
         {(Object.entries(EDGES) as [EdgeId, (typeof EDGES)[EdgeId]][]).map(([id, e]) => (
           <path
             key={id}
             d={e.d}
-            className={`fill-none ${STROKE[e.line]} ${e.line === "http" ? "[stroke-dasharray:8_8]" : ""}`}
-            strokeWidth={6}
-            strokeLinecap="round"
+            className="fill-none stroke-rail"
+            strokeWidth={e.line === "http" ? 4 : 6}
+            strokeDasharray={DASH[e.line]}
+            strokeLinecap={DASH[e.line] ? "butt" : "round"}
             strokeLinejoin="round"
           />
         ))}
         {/* worker → postgres (a commit per handled message, drawn as the pulse) */}
-        <path d={`M1300 ${POSTGRES.y + 20} L1426 ${POSTGRES.y + 20}`} className="fill-none stroke-ink" strokeWidth={3} strokeDasharray="2 6" strokeLinecap="round" />
+        <path d={`M1260 ${POSTGRES.y + 20} L1416 ${POSTGRES.y + 20}`} className="fill-none stroke-ink" strokeWidth={3} strokeDasharray="2 6" strokeLinecap="round" />
         {Object.values(EDGES).map(
           (e) =>
             e.label && (
@@ -128,10 +140,12 @@ export default function FlowMap({
                 className="fill-muted stroke-paper font-mono text-[13px] [paint-order:stroke]"
                 strokeWidth={5}
               >
+                {e.label[4] && <title>{e.label[4]}</title>}
                 {e.label[0]}
               </text>
             ),
         )}
+        <Legend />
 
         {/* client, api */}
         <Box x={CLIENT.x} y={CLIENT.y} w={100} h={60} title="cliente" sub="HTTP" />
@@ -139,23 +153,23 @@ export default function FlowMap({
 
         {(Object.entries(EXCHANGES) as [string, (typeof EXCHANGES)[keyof typeof EXCHANGES]][]).map(([name, ex]) => (
           <g key={name}>
-            <circle cx={ex.x} cy={ex.y} r={26} className={`fill-white ${STROKE[ex.line]}`} strokeWidth={5} />
-            <circle cx={ex.x} cy={ex.y} r={14} className={`fill-white ${STROKE[ex.line]}`} strokeWidth={4} />
+            <circle cx={ex.x} cy={ex.y} r={26} className="fill-white stroke-ink" strokeWidth={4} />
+            <circle cx={ex.x} cy={ex.y} r={13} className="fill-white stroke-ink" strokeWidth={3} />
             <text
-              x={ex.label === "right" ? ex.x + 30 : ex.x}
-              y={ex.label === "right" ? ex.y + 44 : ex.y + 50}
-              textAnchor={ex.label === "right" ? "start" : "middle"}
+              x={ex.label ? ex.x - 14 : ex.x + 34}
+              y={ex.label ? ex.y - 56 : ex.y + 48}
+              textAnchor={ex.label ? "end" : "start"}
               className="fill-ink text-[16px] font-semibold"
             >
               {name}
             </text>
             <text
-              x={ex.label === "right" ? ex.x + 30 : ex.x}
-              y={ex.label === "right" ? ex.y + 59 : ex.y + 65}
-              textAnchor={ex.label === "right" ? "start" : "middle"}
+              x={ex.label ? ex.x - 14 : ex.x + 34}
+              y={ex.label ? ex.y - 41 : ex.y + 63}
+              textAnchor={ex.label ? "end" : "start"}
               className="fill-muted font-mono text-[11px]"
             >
-              {ex.label === "right" ? "topic" : "topic exchange"}
+              topic exchange
             </text>
           </g>
         ))}
@@ -168,17 +182,17 @@ export default function FlowMap({
 
         {/* postgres */}
         <g>
-          {pulses.map((id) => (
+          {pulses.map(({ id, src }) => (
             <motion.circle
               key={id}
               cx={POSTGRES.x}
               cy={POSTGRES.y + 20}
-              className="fill-none stroke-line-orders"
+              className={`fill-none ${STROKE_SRC[src]}`}
               strokeWidth={3}
               initial={{ r: 30, opacity: 0.7 }}
               animate={{ r: 70, opacity: 0 }}
-              transition={{ duration: 0.7, ease: "easeOut" }}
-              onAnimationComplete={() => setPulses((p) => p.filter((x) => x !== id))}
+              transition={{ duration: 0.7 * PACE, ease: "easeOut" }}
+              onAnimationComplete={() => setPulses((p) => p.filter((x) => x.id !== id))}
             />
           ))}
           <path
@@ -236,7 +250,7 @@ function Station({
   reduce: boolean;
   onClick?: () => void;
 }) {
-  const { x, y, line, tab } = STATIONS[name];
+  const { x, y, tab } = STATIONS[name];
   const ready = stat?.ready ?? 0;
   const shown = Math.min(ready, SQUARES);
   const button = onClick
@@ -252,7 +266,7 @@ function Station({
   return (
     <g {...button}>
       <rect x={x - 90} y={y - 48} width={180} height={96} rx={10} className="fill-white stroke-ink" strokeWidth={3} />
-      <rect x={tab === "left" ? x - 90 : x + 80} y={y - 48} width={10} height={96} className={FILL[line]} />
+      <rect x={tab === "left" ? x - 90 : x + 80} y={y - 48} width={10} height={96} className={TAB[name]} />
       <text x={x - 72} y={y - 18} className="fill-ink text-[17px] font-semibold">
         {name}
       </text>
@@ -270,7 +284,7 @@ function Station({
             y={y + 23}
             width={9}
             height={9}
-            className={FILL[line]}
+            className={TAB[name]}
             style={{ transformBox: "fill-box", transformOrigin: "center" }}
             initial={reduce ? false : { scale: 0 }}
             animate={{ scale: 1 }}
@@ -333,10 +347,10 @@ function Worker({ count, flash }: { count: number; flash: Partial<Record<keyof t
                         width={196}
                         height={64}
                         rx={6}
-                        className="fill-line-orders"
+                        className={FILL[lane]}
                         initial={{ opacity: 0.35 }}
                         animate={{ opacity: 0 }}
-                        transition={{ duration: 0.6 }}
+                        transition={{ duration: 0.4 * PACE }}
                       />
                     )}
                     <text x={left + 26} y={ly + 5} className="fill-ink font-mono text-[14px]">
@@ -359,9 +373,57 @@ function Token({ tok, onDone }: { tok: Tok; onDone: (t: Tok) => void }) {
   const cy = useTransform(p, (t) => AT[tok.edge](t).y);
   const opacity = useTransform(p, [0, 0.04, 0.96, 1], [0, 1, 1, 0]);
   useEffect(() => {
-    const c = animate(p, 1, { duration: 0.6, ease: "easeInOut", delay: tok.delay });
+    const c = animate(p, 1, { duration: 0.6 * PACE, ease: "easeInOut", delay: tok.delay });
     c.then(() => onDone(tok));
     return () => c.stop();
   }, [p, tok, onDone]);
-  return <motion.circle r={7} cx={cx} cy={cy} style={{ opacity }} className={`${FILL[EDGES[tok.edge].line]} stroke-ink`} strokeWidth={2.5} />;
+  return <motion.circle r={8} cx={cx} cy={cy} style={{ opacity }} className={`${FILL[tok.src]} stroke-ink`} strokeWidth={2.5} />;
+}
+
+const STROKE_SRC: Record<Src, string> = {
+  api: "stroke-src-api",
+  stock: "stroke-src-stock",
+  payment: "stroke-src-payment",
+  notification: "stroke-src-notification",
+  none: "stroke-src-none",
+};
+
+const LEGEND_LINES: [string, keyof typeof DASH][] = [
+  ["orders", "orders"],
+  ["retry", "retry"],
+  ["dlx", "dlx"],
+  ["expiry", "expiry"],
+];
+
+// Bottom-right, under the dlq: what a token's color and a line's pattern mean.
+function Legend() {
+  const x = 1290;
+  const y = 728;
+  return (
+    <g aria-hidden>
+      <rect x={x} y={y} width={300} height={130} rx={10} className="fill-white stroke-ink" strokeWidth={2} />
+      <text x={x + 16} y={y + 24} className="fill-ink text-[13px] font-semibold">
+        cor = fila de origem
+      </text>
+      {SRC_NAME.map(([src, label], i) => (
+        <g key={src}>
+          <circle cx={x + 24} cy={y + 42 + i * 18} r={6} className={`${FILL[src]} stroke-ink`} strokeWidth={2} />
+          <text x={x + 38} y={y + 46 + i * 18} className="fill-ink font-mono text-[11px]">
+            {label}
+          </text>
+        </g>
+      ))}
+      <text x={x + 170} y={y + 24} className="fill-ink text-[13px] font-semibold">
+        traço
+      </text>
+      {LEGEND_LINES.map(([label, line], i) => (
+        <g key={line}>
+          <path d={`M${x + 170} ${y + 42 + i * 18} h56`} className="stroke-ink" strokeWidth={3} strokeDasharray={DASH[line]} />
+          <text x={x + 234} y={y + 46 + i * 18} className="fill-ink font-mono text-[11px]">
+            {label}
+          </text>
+        </g>
+      ))}
+    </g>
+  );
 }
