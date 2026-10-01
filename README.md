@@ -142,6 +142,7 @@ Os 17 casos de uso, com comandos e evidências, estão em [`docs/etapa4.md`](doc
 | Porta | Serviço |
 |---|---|
 | `8080` | API HTTP (`api`) |
+| `5432` | PostgreSQL (só `127.0.0.1`; usuário, senha e banco `shop`) |
 | `5671` | AMQP sobre TLS (RabbitMQ, só `127.0.0.1`) |
 | `15671` | Management UI HTTPS (RabbitMQ, só `127.0.0.1`) |
 | `3000` | Mapa de Mensagens (`web/`, `npm run dev`) |

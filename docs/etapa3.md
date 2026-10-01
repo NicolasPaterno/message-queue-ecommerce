@@ -409,7 +409,7 @@ nas duas portas; `5672` e `15672` recusam conexão.
 | Limitação | Impacto | Quando resolver |
 |---|---|---|
 | CA própria, sem mTLS | Clientes se autenticam por senha (dentro do TLS), não por certificado | Ambiente com requisito de identidade forte: `fail_if_no_peer_cert = true` e certificado por cliente |
-| PostgreSQL sem TLS | O tráfego `api`/`worker` ↔ banco fica em texto claro, mas só na rede interna do Compose (a porta `5432` não é publicada) | Banco fora da rede do Compose: `sslmode=verify-full` |
+| PostgreSQL sem TLS | O tráfego `api`/`worker` ↔ banco fica em texto claro, mas só na rede do Compose e no próprio host (a porta `5432` é publicada só em `127.0.0.1`, para ferramentas como o DataGrip) | Banco fora da rede do Compose: `sslmode=verify-full` |
 | Um único nó, filas clássicas | O broker é ponto único de falha; sem réplica das filas | Com requisito de alta disponibilidade: cluster de 3 nós e *quorum queues* |
 | `dlq` sem limite | Mensagens com falha se acumulam até alguém inspecionar | Política com `max-length` na `dlq` e alerta de monitoramento |
 | Um nível de retentativa | Espera fixa de 10 s em todas as tentativas | Se falhas longas forem comuns: filas com TTL crescente (backoff exponencial) |
