@@ -32,30 +32,32 @@ Detalhes completos, diagramas e justificativa de decisões em [`docs/etapa2.md`]
 
 ### 1. Pré-requisitos
 
-Docker com Compose v2, `curl` e `jq`. Go 1.27 só é necessário para compilar localmente (`go build ./...`); o Docker compila a imagem sozinho.
+Docker com Compose v2, `openssl`, `curl` e `jq`. Go 1.27 só é necessário para compilar localmente (`go build ./...`); o Docker compila a imagem sozinho.
 
 ### 2. Subir o ambiente
 
 ```sh
 cd deploy
+sh setup.sh
 docker compose up -d --build
 docker compose ps
 until curl -s localhost:8080/orders/x >/dev/null; do sleep 1; done
 ```
 
-`docker compose ps` deve mostrar os 4 serviços rodando: `rabbitmq`, `postgres`, `api` e `worker`. O `until` espera a API responder — ela só aceita requisições depois que o banco e o broker estão prontos (leva ~15 s na primeira vez). Todos os comandos seguintes são executados a partir de `deploy/`.
+`setup.sh` (uma vez) gera o que fica fora do git: CA e certificado TLS do broker (`certs/`), senhas aleatórias dos 4 usuários do RabbitMQ (`.env`), o `definitions.json` a partir de `definitions.tmpl.json` e o `web/.env.local`. `docker compose ps` deve mostrar os 4 serviços rodando: `rabbitmq`, `postgres`, `api` e `worker`. O `until` espera a API responder — ela só aceita requisições depois que o banco e o broker estão prontos (leva ~15 s na primeira vez). Todos os comandos seguintes são executados a partir de `deploy/`.
 
 ### 3. Management UI do RabbitMQ
 
-Acesse `http://localhost:15672` com usuário `worker` e senha `worker`. O usuário `guest` não existe.
+Acesse `https://localhost:15671` com usuário `admin` e a senha `ADMIN_PASS` de `deploy/.env`. O navegador alerta sobre o certificado (CA própria, `deploy/certs/ca.pem`). Só há listeners TLS: AMQP em `5671` e HTTPS em `15671`; as portas `5672`/`15672` não existem e o usuário `guest` não existe.
 
 ### 4. Funções auxiliares
 
 Cole no terminal (bash ou zsh), dentro de `deploy/`:
 
 ```sh
+. ./.env
 sql() { docker compose exec -T postgres psql -U shop -d shop -tAc "$1"; }
-mq()  { curl -s -u worker:worker "localhost:15672/api/$1" "${@:2}"; }
+mq()  { curl -s --cacert certs/ca.pem -u admin:$ADMIN_PASS "https://localhost:15671/api/$1" "${@:2}"; }
 P=$(sql "SELECT id FROM products WHERE name='Keyboard'")
 ```
 
@@ -102,7 +104,7 @@ O `-v` também apaga os dados do banco.
 
 ### 9. Mapa de Mensagens (interface web)
 
-Uma página que desenha a topologia como um mapa de linhas e anima as mensagens ao vivo. Requer Node.js ≥ 20.9 (≥ 23 para `npm test`) e o ambiente do passo 2 rodando.
+Uma página que desenha a topologia como um mapa de linhas e anima as mensagens ao vivo. Requer Node.js ≥ 20.9 (≥ 23 para `npm test`) e o ambiente do passo 2 rodando (o `setup.sh` já criou `web/.env.local`).
 
 ```sh
 cd web
@@ -114,7 +116,7 @@ Abra `http://localhost:3000`. Os botões *Novo pedido*, *Rajada ×5* e *Sem esto
 
 Falha, parada do worker e escala continuam no terminal (passos 6 e 7) e aparecem no mapa. Para repor o estoque: `sql "UPDATE products SET available=10"` (funções do passo 4).
 
-Cada bolinha no mapa é uma mensagem **contada** pelos contadores da Management API do RabbitMQ (atualizados a cada 1 s), não uma mensagem identificada. A página é só leitura sobre o broker: as credenciais da Management API ficam no servidor do Next (`MQ_USER`/`MQ_PASS`, padrão `worker`).
+Cada bolinha no mapa é uma mensagem **contada** pelos contadores da Management API do RabbitMQ (atualizados a cada 1 s), não uma mensagem identificada. A página é só leitura sobre o broker: as credenciais da Management API ficam no servidor do Next (`MQ_USER`/`MQ_PASS` em `web/.env.local`: usuário `monitor`, sem escrita e com `read` só na `dlq`); o `npm run dev` confia na CA via `NODE_EXTRA_CA_CERTS`.
 
 ### Casos de uso
 
@@ -124,7 +126,8 @@ Os 11 casos de uso, com comandos e evidências, estão em [`docs/etapa4.md`](doc
 
 | Variável | Valor no Compose | Usada por |
 |---|---|---|
-| `AMQP_URL` | `amqp://api:api@rabbitmq:5672/%2Fshop` (api) · `amqp://worker:worker@rabbitmq:5672/%2Fshop` (worker) | `api`, `worker` |
+| `AMQP_URL` | `amqps://api:${API_PASS}@rabbitmq:5671/%2Fshop` (api) · `amqps://worker:${WORKER_PASS}@rabbitmq:5671/%2Fshop` (worker) | `api`, `worker` |
+| `SSL_CERT_FILE` | `/certs/ca.pem` | `api`, `worker` — CA usada pelo Go para validar o TLS do broker |
 | `DB_URL` | `postgres://shop:shop@postgres:5432/shop?sslmode=disable` | `api`, `worker` |
 | `FAIL_RATE` | `0` (padrão); `0` a `1` | `worker` — só afeta o pagamento (erro simulado do gateway) |
 
@@ -133,8 +136,8 @@ Os 11 casos de uso, com comandos e evidências, estão em [`docs/etapa4.md`](doc
 | Porta | Serviço |
 |---|---|
 | `8080` | API HTTP (`api`) |
-| `5672` | AMQP (RabbitMQ) |
-| `15672` | Management UI (RabbitMQ) |
+| `5671` | AMQP sobre TLS (RabbitMQ, só `127.0.0.1`) |
+| `15671` | Management UI HTTPS (RabbitMQ, só `127.0.0.1`) |
 | `3000` | Mapa de Mensagens (`web/`, `npm run dev`) |
 
 ## Stack
