@@ -23,7 +23,7 @@ Detalhes completos, diagramas e justificativa de decisões em [`docs/etapa2.md`]
 | [`docs/PRD.md`](docs/PRD.md) | Especificação de build: nomes, casos de uso, regras de implementação, plano de entrega |
 | [`docs/etapa1.md`](docs/etapa1.md) | Cenário e justificativa da mensageria |
 | [`docs/etapa2.md`](docs/etapa2.md) | Arquitetura, topologia, escalabilidade, confiabilidade, tolerância a falhas |
-| [`docs/etapa3.md`](docs/etapa3.md) | Configuração do RabbitMQ: exchanges, filas, argumentos, usuários, TLS |
+| [`docs/etapa3.md`](docs/etapa3.md) | Configuração do RabbitMQ: exchanges, filas, políticas de retry e DLQ, usuários, permissões, TLS |
 | [`docs/etapa4.md`](docs/etapa4.md) | Execução dos casos de uso, com comandos e evidências |
 | [`docs/etapa5.md`](docs/etapa5.md) | Stack, estrutura do código, formato das mensagens, boas práticas, limitações |
 | [`docs/diagramas/`](docs/diagramas) | Diagramas (`.mmd` e `.png`) |
@@ -44,7 +44,7 @@ docker compose ps
 until curl -s localhost:8080/orders/x >/dev/null; do sleep 1; done
 ```
 
-`setup.sh` (uma vez) gera o que fica fora do git: CA e certificado TLS do broker (`certs/`), senhas aleatórias dos 4 usuários do RabbitMQ (`.env`), o `definitions.json` a partir de `definitions.tmpl.json` e o `web/.env.local`. `docker compose ps` deve mostrar os 4 serviços rodando: `rabbitmq`, `postgres`, `api` e `worker`. O `until` espera a API responder — ela só aceita requisições depois que o banco e o broker estão prontos (leva ~15 s na primeira vez). Todos os comandos seguintes são executados a partir de `deploy/`. Se o `init.sql` mudou desde o último `up`, recrie o banco com `docker compose up -d --force-recreate -V postgres` (o `-V` descarta o volume anônimo do Postgres; os dados recomeçam do zero).
+`setup.sh` (uma vez) gera o que fica fora do git: CA e certificado TLS do broker (`certs/`), senhas aleatórias dos 4 usuários do RabbitMQ (`.env`), o `definitions.json` a partir de `definitions.tmpl.json` e o `web/.env.local`. `docker compose ps` deve mostrar os 4 serviços rodando: `rabbitmq`, `postgres`, `api` e `worker`. O `until` espera a API responder, o que só acontece depois que o banco e o broker estão prontos (leva ~15 s na primeira vez). Todos os comandos seguintes são executados a partir de `deploy/`. Se o `init.sql` mudou desde o último `up`, recrie o banco com `docker compose up -d --force-recreate -V postgres` (o `-V` descarta o volume anônimo do Postgres; os dados recomeçam do zero).
 
 ### 3. Management UI do RabbitMQ
 
@@ -133,9 +133,9 @@ Os 17 casos de uso, com comandos e evidências, estão em [`docs/etapa4.md`](doc
 | Variável | Valor no Compose | Usada por |
 |---|---|---|
 | `AMQP_URL` | `amqps://api:${API_PASS}@rabbitmq:5671/%2Fshop` (api) · `amqps://worker:${WORKER_PASS}@rabbitmq:5671/%2Fshop` (worker) | `api`, `worker` |
-| `SSL_CERT_FILE` | `/certs/ca.pem` | `api`, `worker` — CA usada pelo Go para validar o TLS do broker |
+| `SSL_CERT_FILE` | `/certs/ca.pem` | `api`, `worker`: CA usada pelo Go para validar o TLS do broker |
 | `DB_URL` | `postgres://shop:shop@postgres:5432/shop?sslmode=disable` | `api`, `worker` |
-| `FAIL_RATE` | `0` (padrão); `0` a `1` | `worker` — só afeta o pagamento (erro simulado do gateway) |
+| `FAIL_RATE` | `0` (padrão); `0` a `1` | `worker`: só afeta o pagamento (erro simulado do gateway) |
 
 ### Portas
 
