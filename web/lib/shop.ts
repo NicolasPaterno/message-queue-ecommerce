@@ -20,7 +20,7 @@ export interface OrderEvent { at: string; queue: "stock" | "payment" | "notifica
 
 export const getOrder = (id: string): Promise<{ status: OrderStatus; events: OrderEvent[] }> => call("GET", `/orders/${id}`);
 
-// Why the event happened, in the audience's words. First match wins; mirrors the retry/DLQ/expiry rules in internal/mq and stock.
+// Why the event happened, in plain words. First match wins; mirrors the retry/DLQ/expiry rules in internal/mq and stock.
 export function explain(e: OrderEvent, status: OrderStatus): string {
   if (e.outcome === "retry") return `tentativa ${e.attempt}/3 falhou: ${e.error} → nack → retry.q (10 s) → orders`;
   if (e.outcome === "dlq") return `${e.attempt}ª falha → worker publica no dlx → dlq${e.queue === "payment" ? "; pedido segue RESERVED até expirar" : ""}`;
