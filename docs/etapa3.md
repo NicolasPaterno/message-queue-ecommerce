@@ -2,7 +2,7 @@
 ## Etapa 3: Configuração do RabbitMQ
 
 **Trabalho Prático de Mensageria** · Sistemas Distribuídos · FURB
-Prof. Gabriel Castellani · Entrega: 24/09/2026
+Prof. Gabriel Castellani
 
 ---
 

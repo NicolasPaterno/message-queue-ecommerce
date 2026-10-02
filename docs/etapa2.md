@@ -2,7 +2,7 @@
 ## Etapa 2: Arquitetura da Solução
 
 **Trabalho Prático de Mensageria** · Sistemas Distribuídos · FURB
-Prof. Gabriel Castellani · Entrega: 17/09/2026
+Prof. Gabriel Castellani
 
 ---
 
