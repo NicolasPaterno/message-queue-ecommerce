@@ -8,3 +8,6 @@
 deploy/certs/
 deploy/.env
 deploy/definitions.json
+
+# Local planning notes
+docs/PRD.md

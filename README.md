@@ -20,7 +20,6 @@ Detalhes completos, diagramas e justificativa de decisões em [`docs/etapa2.md`]
 
 | Arquivo | Conteúdo |
 |---|---|
-| [`docs/PRD.md`](docs/PRD.md) | Especificação de build: nomes, casos de uso, regras de implementação, plano de entrega |
 | [`docs/etapa1.md`](docs/etapa1.md) | Cenário e justificativa da mensageria |
 | [`docs/etapa2.md`](docs/etapa2.md) | Arquitetura, topologia, escalabilidade, confiabilidade, tolerância a falhas |
 | [`docs/etapa3.md`](docs/etapa3.md) | Configuração do RabbitMQ: exchanges, filas, políticas de retry e DLQ, usuários, permissões, TLS |
